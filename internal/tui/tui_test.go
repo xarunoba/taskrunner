@@ -283,6 +283,134 @@ func TestWorkspaceHeaderUsesTopBorder(t *testing.T) {
 		t.Fatalf("view still contains the taskrunner title:\n%s", view)
 	}
 }
+func TestFooterShowsOnlyTopLevelControls(t *testing.T) {
+	t.Parallel()
+
+	m := newModel(task.NewStore(t.TempDir()), nil)
+	m.resize(80, 24)
+	footer := ansi.Strip(strings.Split(m.View(), "\n")[m.height-2])
+	for _, text := range []string{"tab switch to Jobs", "q quit", "? keybinds"} {
+		if !strings.Contains(footer, text) {
+			t.Fatalf("Tasks footer does not contain %q:\n%s", text, footer)
+		}
+	}
+	for _, text := range []string{"enter run", "n new", "e edit", "d delete"} {
+		if strings.Contains(footer, text) {
+			t.Fatalf("Tasks footer still contains screen action %q:\n%s", text, footer)
+		}
+	}
+
+	m.openTaskForm(task.Task{})
+	footer = ansi.Strip(strings.Split(m.View(), "\n")[m.height-2])
+	for _, text := range []string{"f6 switch to Jobs", "ctrl+c quit", "f1 keybinds"} {
+		if !strings.Contains(footer, text) {
+			t.Fatalf("text-input footer does not contain %q:\n%s", text, footer)
+		}
+	}
+}
+
+func TestFooterControlsSupportMouseInput(t *testing.T) {
+	t.Parallel()
+
+	m := newModel(task.NewStore(t.TempDir()), nil)
+	m.resize(80, 24)
+
+	updated, _ := m.updateMouse(mouseClickOn(t, m.View(), "? keybinds"))
+	m = updated.(model)
+	if !m.helpOpen {
+		t.Fatal("clicking keybind footer control did not open help")
+	}
+	m.helpOpen = false
+
+	updated, _ = m.updateMouse(mouseClickOn(t, m.View(), "tab switch to Jobs"))
+	m = updated.(model)
+	if m.screen != screenJobs {
+		t.Fatalf("clicking tab switch produced screen %d, want Jobs", m.screen)
+	}
+
+	_, cmd := m.updateMouse(mouseClickOn(t, m.View(), "q quit"))
+	if cmd == nil {
+		t.Fatal("clicking quit footer control did not return a quit command")
+	}
+}
+
+func TestAdaptiveKeybindHelpPreservesContextAndCloses(t *testing.T) {
+	t.Parallel()
+
+	m := newModel(task.NewStore(t.TempDir()), []task.Task{{Name: "Visible task", Command: "true"}})
+	m.resize(80, 24)
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'?'}})
+	m = updated.(model)
+	if !m.helpOpen {
+		t.Fatal("? did not open keybind help")
+	}
+	view := ansi.Strip(m.View())
+	assertFillsTerminal(t, m.View(), 80, 24)
+	for _, text := range []string{"╭─ Keybinds - Tasks ", "Visible task", "enter", "run selected task", "General"} {
+		if !strings.Contains(view, text) {
+			t.Fatalf("overlay help does not contain %q:\n%s", text, view)
+		}
+	}
+	groups := m.helpGroups()
+	if len(groups) != 2 || groups[0].title != "" || groups[1].title != "General" {
+		t.Fatalf("help section titles = %#v, want only General", groups)
+	}
+
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m = updated.(model)
+	if m.helpOpen || m.screen != screenList {
+		t.Fatalf("closing help produced open=%t screen=%d", m.helpOpen, m.screen)
+	}
+
+	m.resize(40, 10)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'?'}})
+	m = updated.(model)
+	assertFillsTerminal(t, m.View(), 40, 10)
+	if view := ansi.Strip(m.View()); !strings.Contains(view, "╭─ Keybinds - Tasks ") {
+		t.Fatalf("compact help fallback is missing its border title:\n%s", view)
+	}
+}
+
+func TestKeybindHelpReopensAtTop(t *testing.T) {
+	t.Parallel()
+
+	m := newModel(task.NewStore(t.TempDir()), nil)
+	m.resize(40, 10)
+	m.openTaskForm(task.Task{})
+	m.openHelp()
+	m.helpViewport.GotoBottom()
+	if m.helpViewport.AtTop() {
+		t.Fatal("test setup did not produce scrollable help")
+	}
+
+	m.helpOpen = false
+	m.openHelp()
+	if !m.helpViewport.AtTop() || m.helpViewport.YOffset != 0 {
+		t.Fatalf("reopened help offset = %d, want top", m.helpViewport.YOffset)
+	}
+}
+
+func TestQuestionMarkRemainsEditableAndF1OpensHelp(t *testing.T) {
+	t.Parallel()
+
+	m := newModel(task.NewStore(t.TempDir()), nil)
+	m.resize(80, 24)
+	m.openTaskForm(task.Task{})
+	m.taskFocus = 1
+	m.focusTaskControl()
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'?'}})
+	m = updated.(model)
+	if m.helpOpen || m.taskCommandInput.Value() != "?" {
+		t.Fatalf("question mark in command produced help=%t value=%q", m.helpOpen, m.taskCommandInput.Value())
+	}
+
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyF1})
+	m = updated.(model)
+	if !m.helpOpen {
+		t.Fatal("F1 did not open help while editing command text")
+	}
+}
 
 func TestTabsRestoreScreenAndValues(t *testing.T) {
 	t.Parallel()
@@ -505,6 +633,28 @@ func TestTaskFormArrowAndMouseNavigation(t *testing.T) {
 	m = updated.(model)
 	if m.taskFocus != 2 {
 		t.Fatalf("wheel up from fields focus = %d, want 2", m.taskFocus)
+	}
+}
+
+func TestTaskCommandEditorStartsMultiline(t *testing.T) {
+	t.Parallel()
+
+	m := newModel(task.NewStore(t.TempDir()), nil)
+	m.resize(80, 24)
+	m.openTaskForm(task.Task{})
+
+	lines := strings.Split(ansi.Strip(m.View()), "\n")
+	labelLine, hintLine := -1, -1
+	for i, line := range lines {
+		switch {
+		case strings.Contains(line, "Command template"):
+			labelLine = i
+		case strings.Contains(line, "Use {{field_key}}"):
+			hintLine = i
+		}
+	}
+	if labelLine < 0 || hintLine != labelLine+4 {
+		t.Fatalf("empty command editor does not reserve three rows:\n%s", ansi.Strip(m.View()))
 	}
 }
 

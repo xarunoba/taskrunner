@@ -35,6 +35,7 @@ The current working directory is the workspace.
 ## TUI
 
 Run `taskrunner` without arguments to open the **Tasks** tab.
+The footer keeps only the tab switch, quit, and keybind-help controls. Press `?` to open help for the current screen. While editing text, use `F1` for help and `Ctrl+C` to quit so `?` and `q` remain available as input. Help opens as a centered overlay when space permits and replaces the content panel on narrow or short terminals.
 
 ### Tasks
 

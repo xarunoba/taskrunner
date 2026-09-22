@@ -20,6 +20,8 @@ import (
 
 type screen uint8
 
+const taskCommandMinHeight = 3
+
 const (
 	screenList screen = iota
 	screenTask
@@ -48,6 +50,7 @@ var (
 	jobSucceededStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("0")).Background(lipgloss.Color("42")).Bold(true).Padding(0, 1)
 	jobFailedStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("230")).Background(lipgloss.Color("196")).Bold(true).Padding(0, 1)
 	jobCanceledStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("255")).Background(lipgloss.Color("241")).Bold(true).Padding(0, 1)
+	helpModalStyle      = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(accentColor).Padding(1, 2)
 )
 
 var fieldTypes = []task.FieldType{
@@ -91,24 +94,36 @@ type jobActionMsg struct {
 	err    error
 }
 
+type helpBinding struct {
+	key         string
+	description string
+}
+
+type helpGroup struct {
+	title    string
+	bindings []helpBinding
+}
+
 type model struct {
-	store       *task.Store
-	daemon      *daemon.Client
-	tasks       []task.Task
-	jobs        []daemon.Job
-	running     map[string]int
-	queued      map[string]int
-	latest      map[string]daemon.Status
-	trackedJobs map[string]struct{}
-	cursor      int
-	jobCursor   int
-	screen      screen
-	taskScreen  screen
-	jobScreen   screen
-	status      string
-	statusError bool
-	width       int
-	height      int
+	store        *task.Store
+	daemon       *daemon.Client
+	tasks        []task.Task
+	jobs         []daemon.Job
+	running      map[string]int
+	queued       map[string]int
+	latest       map[string]daemon.Status
+	trackedJobs  map[string]struct{}
+	cursor       int
+	jobCursor    int
+	screen       screen
+	taskScreen   screen
+	jobScreen    screen
+	status       string
+	statusError  bool
+	width        int
+	height       int
+	helpOpen     bool
+	helpViewport viewport.Model
 
 	taskNameInput    textinput.Model
 	taskCommandInput textarea.Model
@@ -149,12 +164,13 @@ func newModel(store *task.Store, tasks []task.Task) model {
 	command.Prompt = ""
 	command.ShowLineNumbers = false
 	command.CharLimit = 1000
-	command.SetHeight(3)
+	command.SetHeight(taskCommandMinHeight)
 	key := newInput("environment", 50)
 	label := newInput("Environment", 100)
 	options := newInput("development, staging, production", 1000)
 	resultViewport := viewport.New(1, 1)
 	taskViewport := viewport.New(1, 1)
+	helpViewport := viewport.New(1, 1)
 
 	return model{
 		store:            store,
@@ -168,6 +184,7 @@ func newModel(store *task.Store, tasks []task.Task) model {
 		taskNameInput:    name,
 		taskCommandInput: command,
 		taskViewport:     taskViewport,
+		helpViewport:     helpViewport,
 		fieldInputs:      [3]textinput.Model{key, label, options},
 		editingField:     -1,
 		resultViewport:   resultViewport,
@@ -222,11 +239,12 @@ func (m *model) resizeTaskForm() {
 }
 
 func taskCommandVisualHeight(command string, width int) int {
-	if command == "" {
-		return 1
-	}
+	return max(taskCommandMinHeight, taskCommandLineHeight(command, width))
+}
+
+func taskCommandLineHeight(command string, width int) int {
 	wrapped := ansi.Wrap(command, max(1, width), " ")
-	return max(1, strings.Count(wrapped, "\n")+1)
+	return strings.Count(wrapped, "\n") + 1
 }
 
 func (m model) taskCommandView() string {
@@ -272,6 +290,238 @@ func (m model) gap() string {
 		return "\n"
 	}
 	return "\n\n"
+}
+
+func (m model) acceptsTextInput() bool {
+	switch m.screen {
+	case screenTask:
+		return m.taskFocus == 0 || m.taskFocus == 1
+	case screenField:
+		return m.fieldFocus == 0 || m.fieldFocus == 1 || m.fieldFocus == 3
+	case screenRun:
+		return len(m.runTask.Fields) > 0 && m.runTask.Fields[m.runIndex].Type == task.FieldText
+	default:
+		return false
+	}
+}
+
+func (m model) helpGroups() []helpGroup {
+	general := helpGroup{
+		title: "General",
+		bindings: []helpBinding{
+			{key: "tab / f6", description: "switch Tasks or Jobs"},
+			{key: "q / ctrl+c", description: "quit"},
+			{key: "? / f1 / esc", description: "close keybinds"},
+		},
+	}
+	switch m.screen {
+	case screenTask:
+		return []helpGroup{
+			{
+				bindings: []helpBinding{
+					{key: "tab / shift+tab", description: "move between sections"},
+					{key: "↑ / ↓", description: "move or select"},
+					{key: "enter", description: "insert command line or edit field"},
+					{key: "← / →", description: "change job policy"},
+					{key: "a / e / d", description: "add, edit, or delete field"},
+					{key: "[ / ]", description: "reorder selected field"},
+					{key: "f2 / ctrl+s", description: "save task"},
+					{key: "esc", description: "cancel"},
+				},
+			},
+			general,
+		}
+	case screenField:
+		return []helpGroup{
+			{
+				bindings: []helpBinding{
+					{key: "tab / shift+tab", description: "move between controls"},
+					{key: "↑ / ↓", description: "move between controls"},
+					{key: "← / → / space", description: "change selected option"},
+					{key: "enter / ctrl+s", description: "save field"},
+					{key: "esc", description: "cancel"},
+				},
+			},
+			general,
+		}
+	case screenRun:
+		bindings := []helpBinding{
+			{key: "enter", description: "accept and continue"},
+			{key: "shift+tab / ctrl+←", description: "return to previous field"},
+			{key: "esc", description: "cancel run"},
+		}
+		if len(m.runTask.Fields) > 0 {
+			switch m.runTask.Fields[m.runIndex].Type {
+			case task.FieldText, task.FieldChoice:
+				bindings = append(bindings, helpBinding{key: "↑ / ↓", description: "history or choice"})
+			case task.FieldFile:
+				bindings = append(bindings, helpBinding{key: "↑ / ↓", description: "browse files"})
+			case task.FieldConfirm:
+				bindings = append(bindings, helpBinding{key: "← / →", description: "choose No or Yes"})
+			}
+		}
+		return []helpGroup{{bindings: bindings}, general}
+	case screenJobs:
+		return []helpGroup{
+			{
+				bindings: []helpBinding{
+					{key: "↑ / k", description: "select previous job"},
+					{key: "↓ / j", description: "select next job"},
+					{key: "enter", description: "open selected log"},
+					{key: "c", description: "cancel selected job"},
+					{key: "r", description: "rerun selected job"},
+					{key: "d", description: "delete selected completed job"},
+				},
+			},
+			general,
+		}
+	case screenResult:
+		return []helpGroup{
+			{
+				bindings: []helpBinding{
+					{key: "↑ / ↓", description: "scroll one line"},
+					{key: "pgup / pgdown", description: "scroll one page"},
+					{key: "home / g", description: "jump to top"},
+					{key: "end / G", description: "jump to bottom"},
+					{key: "c / r / d", description: "cancel, rerun, or delete job"},
+					{key: "esc", description: "return to Jobs"},
+				},
+			},
+			general,
+		}
+	default:
+		return []helpGroup{
+			{
+				bindings: []helpBinding{
+					{key: "↑ / k", description: "select previous task"},
+					{key: "↓ / j", description: "select next task"},
+					{key: "enter", description: "run selected task"},
+					{key: "n / e / d", description: "new, edit, or delete task"},
+				},
+			},
+			general,
+		}
+	}
+}
+
+func (m model) helpContent() string {
+	var body strings.Builder
+	for _, group := range m.helpGroups() {
+		if body.Len() > 0 {
+			body.WriteString("\n\n")
+		}
+		if group.title != "" {
+			body.WriteString(accentStyle.Render(group.title))
+			body.WriteByte('\n')
+		}
+		keyWidth := 0
+		for _, binding := range group.bindings {
+			keyWidth = max(keyWidth, ansi.StringWidth(binding.key))
+		}
+		for i, binding := range group.bindings {
+			if i > 0 {
+				body.WriteByte('\n')
+			}
+			body.WriteString("  ")
+			body.WriteString(mutedStyle.Render(binding.key))
+			body.WriteString(strings.Repeat(" ", keyWidth-ansi.StringWidth(binding.key)+2))
+			body.WriteString(binding.description)
+		}
+	}
+	return body.String()
+}
+
+func (m model) helpScreenName() string {
+	switch m.screen {
+	case screenTask:
+		return "Task editor"
+	case screenField:
+		return "Field editor"
+	case screenRun:
+		return "Run task"
+	case screenJobs:
+		return "Jobs"
+	case screenResult:
+		return "Job log"
+	default:
+		return "Tasks"
+	}
+}
+
+func (m model) helpTitle() string {
+	return "Keybinds - " + m.helpScreenName()
+}
+
+func (m model) compactHelp() bool {
+	return m.width < 60 || m.height < 18
+}
+
+func (m *model) syncHelpViewport() {
+	content := m.helpContent()
+	lineCount := strings.Count(content, "\n") + 1
+	if m.compactHelp() {
+		m.helpViewport.Width = max(1, m.contentWidth()-1)
+		m.helpViewport.Height = m.contentHeight()
+	} else {
+		modalWidth := min(72, max(1, m.width-8))
+		m.helpViewport.Width = max(1, modalWidth-helpModalStyle.GetHorizontalFrameSize())
+		maxHeight := max(1, m.height-6-helpModalStyle.GetVerticalFrameSize())
+		m.helpViewport.Height = min(lineCount, maxHeight)
+	}
+	m.helpViewport.SetContent(content)
+}
+
+func (m *model) openHelp() {
+	m.helpOpen = true
+	m.syncHelpViewport()
+	m.helpViewport.GotoTop()
+}
+
+func (m model) updateHelp(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if key, ok := msg.(tea.KeyMsg); ok {
+		switch key.String() {
+		case "?", "f1", "esc":
+			m.helpOpen = false
+			return m, nil
+		case "q":
+			return m, tea.Quit
+		case "home", "g":
+			m.helpViewport.GotoTop()
+			return m, nil
+		case "end", "G":
+			m.helpViewport.GotoBottom()
+			return m, nil
+		}
+	}
+	var cmd tea.Cmd
+	m.helpViewport, cmd = m.helpViewport.Update(msg)
+	return m, cmd
+}
+
+func (m model) footerControls() []string {
+	target := "Jobs"
+	switchKey := "tab"
+	if topLevelTab(m.screen) == screenJobs {
+		target = "Tasks"
+	}
+	if m.screen != screenList && m.screen != screenJobs {
+		switchKey = "f6"
+	}
+	quitKey := "q"
+	helpKey := "?"
+	if m.acceptsTextInput() {
+		quitKey = "ctrl+c"
+		helpKey = "f1"
+	}
+	return []string{
+		fmt.Sprintf("%s switch to %s", switchKey, target),
+		quitKey + " quit",
+		helpKey + " keybinds",
+	}
+}
+
+func (m model) topLevelFooter() string {
+	return strings.Join(m.footerControls(), " • ")
 }
 
 func (m model) Init() tea.Cmd {
@@ -320,6 +570,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.resize(msg.Width, msg.Height)
+		if m.helpOpen {
+			m.syncHelpViewport()
+		}
 		return m, nil
 	case daemonPollMsg:
 		m.applyDaemonPoll(msg)
@@ -346,11 +599,34 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.applyJobAction(msg)
 		return m, nil
 	case tea.MouseMsg:
+		if m.helpOpen {
+			if tea.MouseEvent(msg).IsWheel() {
+				return m.updateHelp(msg)
+			}
+			return m, nil
+		}
 		return m.updateMouse(msg)
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "ctrl+c":
 			return m, tea.Quit
+		}
+		if m.helpOpen {
+			return m.updateHelp(msg)
+		}
+		switch msg.String() {
+		case "f1":
+			m.openHelp()
+			return m, nil
+		case "?":
+			if !m.acceptsTextInput() {
+				m.openHelp()
+				return m, nil
+			}
+		case "q":
+			if !m.acceptsTextInput() {
+				return m, tea.Quit
+			}
 		case "f6":
 			m.switchTab(otherTopLevelTab(m.screen))
 			return m, nil
@@ -410,6 +686,18 @@ func (m model) updateMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	}
 
 	line := m.mouseLine(event.Y)
+	if m.mouseLineIsLastMatch(event.Y, "keybinds") {
+		switch optionAtX(line, event.X-3, m.footerControls()) {
+		case 0:
+			m.switchTab(otherTopLevelTab(m.screen))
+			return m, nil
+		case 1:
+			return m, tea.Quit
+		case 2:
+			m.openHelp()
+			return m, nil
+		}
+	}
 	switch m.screen {
 	case screenTask:
 		return m.clickTaskForm(line, event.X)
@@ -420,20 +708,6 @@ func (m model) updateMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	case screenJobs:
 		return m.clickJobs(line, event.X)
 	case screenResult:
-		if !m.mouseLineIsLastMatch(event.Y, "esc back") {
-			return m, nil
-		}
-		switch optionAtX(line, event.X-3, []string{"esc back", "c cancel", "r rerun", "d delete job"}) {
-		case 0:
-			m.showScreen(screenJobs)
-			return m, nil
-		case 1:
-			return m.updateResult(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'c'}})
-		case 2:
-			return m.updateResult(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
-		case 3:
-			return m.updateResult(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
-		}
 		return m, nil
 	default:
 		return m.clickTaskList(line, event.X)
@@ -1590,6 +1864,43 @@ func (m model) updateResult(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m model) View() string {
+	base := m.baseView()
+	if !m.helpOpen {
+		return base
+	}
+	m.syncHelpViewport()
+	help := lipgloss.JoinHorizontal(
+		lipgloss.Top,
+		m.helpViewport.View(),
+		scrollBar(
+			m.helpViewport.Height,
+			!m.helpViewport.AtTop() || !m.helpViewport.AtBottom(),
+			m.helpViewport.ScrollPercent(),
+		),
+	)
+	if m.compactHelp() {
+		panel := titledPanel(m.renderPanelWithFooter(help), m.helpTitle())
+		return panel + "\n" + m.statusBar()
+	}
+	return overlay(base, titledPanel(helpModalStyle.Render(help), m.helpTitle()), m.width, m.height)
+}
+
+func titledPanel(panel, title string) string {
+	lines := strings.Split(panel, "\n")
+	if len(lines) == 0 {
+		return panel
+	}
+	width := ansi.StringWidth(lines[0])
+	titleWidth := max(0, width-5)
+	title = ansi.Truncate(accentStyle.Render(title), titleWidth, "…")
+	fillWidth := max(0, width-ansi.StringWidth(title)-5)
+	lines[0] = borderStyle.Render("╭─ ") +
+		title +
+		borderStyle.Render(" "+strings.Repeat("─", fillWidth)+"╮")
+	return strings.Join(lines, "\n")
+}
+
+func (m model) baseView() string {
 	switch m.screen {
 	case screenTask:
 		return m.taskFormView()
@@ -1604,6 +1915,35 @@ func (m model) View() string {
 	default:
 		return m.listView()
 	}
+}
+
+func overlay(background, foreground string, width, height int) string {
+	backgroundLines := strings.Split(background, "\n")
+	foregroundLines := strings.Split(foreground, "\n")
+	foregroundWidth := lipgloss.Width(foreground)
+	x := max(0, (width-foregroundWidth)/2)
+	y := max(0, (height-len(foregroundLines))/2)
+	lines := make([]string, height)
+	for i := range lines {
+		if i < len(backgroundLines) {
+			lines[i] = ansi.Truncate(backgroundLines[i], width, "")
+		}
+		lines[i] += strings.Repeat(" ", max(0, width-ansi.StringWidth(lines[i])))
+	}
+	for i, foregroundLine := range foregroundLines {
+		row := y + i
+		if row >= len(lines) {
+			break
+		}
+		left := ansi.Cut(lines[row], 0, x)
+		left += strings.Repeat(" ", max(0, x-ansi.StringWidth(left)))
+		rightStart := min(width, x+foregroundWidth)
+		right := ansi.Cut(lines[row], rightStart, width)
+		line := left + foregroundLine + right
+		lines[row] = ansi.Truncate(line, width, "")
+		lines[row] += strings.Repeat(" ", max(0, width-ansi.StringWidth(lines[row])))
+	}
+	return strings.Join(lines, "\n")
 }
 
 func topLevelTab(current screen) screen {
@@ -1664,8 +2004,8 @@ func (m model) workspaceHeader(active screen) string {
 		borderStyle.Render(" "+strings.Repeat("─", fillWidth)+"╮")
 }
 
-func (m model) renderWorkspacePanel(content string, active screen, footer string) string {
-	panel := m.renderPanelWithFooter(content, footer)
+func (m model) renderWorkspacePanel(content string, active screen) string {
+	panel := m.renderPanelWithFooter(content)
 	_, rest, ok := strings.Cut(panel, "\n")
 	view := m.workspaceHeader(active)
 	if ok {
@@ -1712,11 +2052,7 @@ func (m model) listView() string {
 		}
 	}
 
-	return m.renderWorkspacePanel(
-		body.String(),
-		screenList,
-		"tab switch • enter run • n new • e edit • d delete • q quit",
-	)
+	return m.renderWorkspacePanel(body.String(), screenList)
 }
 
 func jobPolicySummary(policy task.JobPolicy) string {
@@ -1779,11 +2115,7 @@ func (m model) jobsView() string {
 			}
 		}
 	}
-	return m.renderWorkspacePanel(
-		body.String(),
-		screenJobs,
-		"tab switch • enter log • c cancel • r rerun • d delete job • q quit",
-	)
+	return m.renderWorkspacePanel(body.String(), screenJobs)
 }
 
 func visibleRange(total, current, limit int) (int, int) {
@@ -1835,11 +2167,7 @@ func (m model) taskFormView() string {
 		form.View(),
 		scrollBar(form.Height, lineCount > form.Height, form.ScrollPercent()),
 	)
-	return m.renderWorkspacePanel(
-		view,
-		screenTask,
-		"f6 switch tab • tab section • ←/→ policy • [/] reorder • a add • e edit • d delete • f2 save • esc cancel",
-	)
+	return m.renderWorkspacePanel(view, screenTask)
 }
 
 func (m model) taskFormContent() (string, int) {
@@ -1913,7 +2241,7 @@ func (m model) taskCommandCursorLine() int {
 	current := min(m.taskCommandInput.Line(), len(lines)-1)
 	line := 0
 	for i := 0; i < current; i++ {
-		line += taskCommandVisualHeight(lines[i], m.taskCommandInput.Width())
+		line += taskCommandLineHeight(lines[i], m.taskCommandInput.Width())
 	}
 	return line + m.taskCommandInput.LineInfo().RowOffset
 }
@@ -2004,16 +2332,11 @@ func (m model) fieldFormView() string {
 		requirement = 1
 	}
 	body.WriteString(m.pickerRow([]string{"Required", "Optional"}, requirement))
-	return m.renderWorkspacePanel(
-		body.String(),
-		screenField,
-		"f6 switch tab • ↑/↓ step • ←/→ change • space toggle • enter save • esc cancel",
-	)
+	return m.renderWorkspacePanel(body.String(), screenField)
 }
 
 func (m model) runFormView() string {
 	field := m.runTask.Fields[m.runIndex]
-	var help string
 	var body strings.Builder
 	body.WriteString(accentStyle.Render(m.runTask.Name))
 	body.WriteString("\n")
@@ -2033,10 +2356,6 @@ func (m model) runFormView() string {
 	switch field.Type {
 	case task.FieldText:
 		body.WriteString(m.runInput.View())
-		help = "enter continue • ↑/↓ history • shift+tab back • esc cancel"
-		if field.Optional {
-			help = "enter skip/continue • ↑/↓ history • shift+tab back • esc cancel"
-		}
 	case task.FieldChoice:
 		if field.Optional {
 			skip := "  Skip"
@@ -2064,25 +2383,16 @@ func (m model) runFormView() string {
 			body.WriteString(mutedStyle.Render(fmt.Sprintf("↓ %d more", len(field.Options)-end)))
 			body.WriteByte('\n')
 		}
-		help = "↑/↓ choose • shift+tab back • enter continue • esc cancel"
 	case task.FieldFile:
 		body.WriteString(m.filePicker.View())
-		help = "↑/↓ browse • shift+tab back • enter open/select • esc cancel"
-		if field.Optional {
-			help = "↑/↓ browse • s/click skip • enter select • shift+tab back • esc cancel"
-		}
 	case task.FieldConfirm:
 		selected := 0
 		if m.confirmationYes {
 			selected = 1
 		}
 		body.WriteString(m.pickerRow([]string{"No", "Yes"}, selected))
-		help = "←/→ choose • shift+tab back • enter confirm • esc cancel"
-		if field.Optional {
-			help = "←/→ choose • enter continue • shift+tab back • esc cancel"
-		}
 	}
-	return m.renderWorkspacePanel(body.String(), screenRun, "f6 switch tab • "+help)
+	return m.renderWorkspacePanel(body.String(), screenRun)
 }
 
 func (m model) resultView() string {
@@ -2118,11 +2428,7 @@ func (m model) resultView() string {
 			m.resultViewport.ScrollPercent(),
 		),
 	))
-	footer := fmt.Sprintf(
-		"esc back • c cancel • r rerun • d delete job • ↑/↓ scroll • pgup/pgdown page • home/end jump • %.0f%%",
-		m.resultViewport.ScrollPercent()*100,
-	)
-	return m.renderWorkspacePanel(body.String(), screenResult, "f6 switch tab • "+footer)
+	return m.renderWorkspacePanel(body.String(), screenResult)
 }
 
 func (m model) statusBar() string {
@@ -2141,19 +2447,19 @@ func (m model) statusBar() string {
 	return style.Render(line)
 }
 
-func (m model) navigationFooter(footer string) string {
+func (m model) navigationFooter() string {
 	width := m.contentWidth() + panelStyle.GetHorizontalFrameSize()
 	titleWidth := max(0, width-5)
-	title := mutedStyle.Render(ansi.Truncate(footer, titleWidth, "…"))
+	title := mutedStyle.Render(ansi.Truncate(m.topLevelFooter(), titleWidth, "…"))
 	fillWidth := max(0, width-ansi.StringWidth(title)-5)
 	return borderStyle.Render("╰─ ") +
 		title +
 		borderStyle.Render(" "+strings.Repeat("─", fillWidth)+"╯")
 }
 
-func (m model) renderPanelWithFooter(content, footer string) string {
+func (m model) renderPanelWithFooter(content string) string {
 	lines := strings.Split(m.renderPanel(content), "\n")
-	lines[len(lines)-1] = m.navigationFooter(footer)
+	lines[len(lines)-1] = m.navigationFooter()
 	return strings.Join(lines, "\n")
 }
 
