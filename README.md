@@ -54,7 +54,8 @@ Run `taskrunner` without arguments to open the **Tasks** tab.
 
 | Input | Action |
 | --- | --- |
-| `↑` / `↓` | Move between the name, command, job policy, and field list |
+| `↑` / `↓` | Move between sections; move between lines in the command editor |
+| `Enter` | Insert a new line in the command editor; advance or edit elsewhere |
 | `Tab` / `Shift+Tab` | Move forward or backward between sections |
 | `←` / `→` or `h` / `l` | Select a job policy while that section is active |
 | `a` | Add a field |
@@ -63,6 +64,8 @@ Run `taskrunner` without arguments to open the **Tasks** tab.
 | `[` / `]` | Move the selected field earlier or later |
 | `F2` or `Ctrl+S` | Save the task |
 | `Esc` | Cancel |
+
+The task name label stays above its input. The complete task form uses one scrolling viewport with a position bar, and automatically keeps the active input or field visible. Job logs use the same position bar.
 
 Fields run in their displayed order. A field can be required or optional and can use safe argument interpolation or raw shell interpolation.
 
@@ -107,7 +110,7 @@ The **Tasks** tab marks running and queued jobs. When a task is idle, it shows t
 | `Tab` / `Shift+Tab` | Switch between the **Tasks** and **Jobs** tabs |
 | `c` | Cancel the selected queued or running job |
 | `r` | Rerun the selected job as a new job |
-| `d` | Delete output from the selected completed job |
+| `d` | Delete the selected completed job and its output |
 | `q` | Quit |
 | Mouse click | Select a job or control; click a selected job again to open its log |
 
@@ -121,7 +124,7 @@ Running logs update live. The log viewport uses all available panel height. Comp
 | `End` or `G` | Jump to the bottom |
 | `c` | Cancel this queued or running job |
 | `r` | Rerun this job as a new job |
-| `d` | Delete output from this completed job |
+| `d` | Delete this completed job and its output |
 | `Esc` | Return to the **Jobs** tab |
 | Mouse wheel | Scroll the log |
 

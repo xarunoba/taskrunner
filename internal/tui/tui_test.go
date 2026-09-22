@@ -46,8 +46,8 @@ func TestViewsFitTerminal(t *testing.T) {
 			m.openTaskForm(task.Task{})
 			m.taskFocus = 3
 			assertFillsTerminal(t, m.View(), size.width, size.height)
-			if !strings.Contains(m.View(), "› No fields") {
-				t.Fatal("empty focused fields step has no caret")
+			if view := ansi.Strip(m.View()); !strings.Contains(view, "› No fields") {
+				t.Fatalf("task form viewport hides focused fields:\n%s", view)
 			}
 
 			m.formFields = []task.Field{
@@ -57,6 +57,69 @@ func TestViewsFitTerminal(t *testing.T) {
 			m.fieldFocus = 4
 			assertFillsTerminal(t, m.View(), size.width, size.height)
 		})
+	}
+}
+
+func TestTaskFormViewportFollowsFocusedControls(t *testing.T) {
+	t.Parallel()
+
+	command := "one\ntwo\nthree\nfour"
+	fields := []task.Field{
+		{Key: "one", Label: "One", Type: task.FieldText},
+		{Key: "two", Label: "Two", Type: task.FieldText},
+		{Key: "three", Label: "Three", Type: task.FieldText},
+		{Key: "four", Label: "Four", Type: task.FieldText},
+	}
+	m := newModel(task.NewStore(t.TempDir()), nil)
+	m.resize(24, 10)
+	m.openTaskForm(task.Task{Name: "Compact", Command: command, Fields: fields})
+
+	view := ansi.Strip(m.View())
+	viewLines := strings.Split(view, "\n")
+	nameLine, inputLine := -1, -1
+	for i, line := range viewLines {
+		if strings.Contains(line, "Name") {
+			nameLine = i
+		}
+		if strings.Contains(line, "Compact") {
+			inputLine = i
+		}
+	}
+	if nameLine < 0 || inputLine != nameLine+1 {
+		t.Fatalf("task name label is not directly above its input:\n%s", view)
+	}
+	if !strings.Contains(view, "█") {
+		t.Fatalf("scrollable task form has no position bar:\n%s", view)
+	}
+
+	m.taskFocus = 1
+	m.focusTaskControl()
+	updated, _ := m.updateTaskForm(tea.KeyMsg{Type: tea.KeyCtrlEnd})
+	m = updated.(model)
+	view = ansi.Strip(m.View())
+	if !strings.Contains(view, "four") {
+		t.Fatalf("task form viewport does not follow the command cursor:\n%s", view)
+	}
+	if got := m.taskCommandInput.Value(); got != command {
+		t.Fatalf("task form viewport changed the command:\n%q", got)
+	}
+
+	m.taskFocus = 3
+	m.fieldCursor = len(fields) - 1
+	view = ansi.Strip(m.View())
+	if !strings.Contains(view, "4. Four") {
+		t.Fatalf("task form viewport does not follow the selected field:\n%s", view)
+	}
+}
+
+func TestScrollBarShowsViewportPosition(t *testing.T) {
+	t.Parallel()
+
+	if got, want := ansi.Strip(scrollBar(3, true, 0)), "█\n│\n│"; got != want {
+		t.Fatalf("top scroll bar = %q, want %q", got, want)
+	}
+	if got, want := ansi.Strip(scrollBar(3, true, 1)), "│\n│\n█"; got != want {
+		t.Fatalf("bottom scroll bar = %q, want %q", got, want)
 	}
 }
 
@@ -87,12 +150,15 @@ func TestTaskLogOpensAtBottomAndOutputClickDoesNotClose(t *testing.T) {
 	if !m.resultViewport.AtBottom() {
 		t.Fatal("result viewport did not open at the bottom")
 	}
-	if got, want := m.resultViewport.Height, m.contentHeight()-2; got != want {
+	if got, want := m.resultViewport.Height, m.contentHeight()-1; got != want {
 		t.Fatalf("compact log viewport height = %d, want maximum %d", got, want)
 	}
 	assertFillsTerminal(t, m.View(), 40, 10)
 	if view := ansi.Strip(m.View()); !strings.Contains(view, "esc back") {
 		t.Fatalf("result view does not show final output line:\n%s", view)
+	}
+	if view := ansi.Strip(m.View()); !strings.Contains(view, "█") {
+		t.Fatalf("scrollable job log has no position bar:\n%s", view)
 	}
 
 	updated, _ = m.updateMouse(mouseClickOn(t, m.View(), "esc back"))
@@ -126,12 +192,50 @@ func TestFailedTaskLogShowsFailureSummary(t *testing.T) {
 		Error:   "exit status 7",
 	}})
 	m = updated.(model)
-	view := ansi.Strip(m.View())
-	if !strings.Contains(view, "FAILED  Failing task: exit status 7") {
+	styledView := m.View()
+	view := ansi.Strip(styledView)
+	if !strings.Contains(view, "FAILED") || !strings.Contains(view, "Failing task: exit status 7") {
 		t.Fatalf("result view does not contain failure summary:\n%s", view)
+	}
+	if !strings.Contains(styledView, jobFailedStyle.Render("FAILED")) {
+		t.Fatalf("failed status does not use its background badge:\n%s", styledView)
+	}
+	if strings.Contains(view, "JOB LOG") {
+		t.Fatalf("result view still contains the redundant JOB LOG title:\n%s", view)
 	}
 	if !strings.Contains(view, "failure details") {
 		t.Fatalf("result view does not contain command output:\n%s", view)
+	}
+}
+
+func TestTaskLogWrapsTheCompleteCommand(t *testing.T) {
+	t.Parallel()
+
+	command := "printf '%s' alpha-bravo-charlie-delta-echo\nprintf finished"
+	m := newModel(task.NewStore(t.TempDir()), nil)
+	m.resize(32, 16)
+	m.openResult(daemon.Job{
+		ID:      "run-wrapped",
+		Name:    "Wrapped command",
+		Command: command,
+		Status:  daemon.StatusSucceeded,
+	})
+
+	log := ansi.Strip(m.resultViewport.View())
+	compact := strings.NewReplacer(" ", "", "\n", "", "\r", "").Replace
+	if !strings.Contains(compact(log), compact("$ "+command)) {
+		t.Fatalf("wrapped log does not contain the complete command:\n%s", log)
+	}
+	if strings.Contains(log, "alpha-bravo-charlie-delta-echo") {
+		t.Fatalf("long command line did not wrap inside the log:\n%s", log)
+	}
+
+	longName := "task-name-that-is-too-long-for-the-list-panel"
+	list := newModel(task.NewStore(t.TempDir()), []task.Task{{Name: longName, Command: command}})
+	list.resize(32, 16)
+	listView := ansi.Strip(list.View())
+	if strings.Contains(listView, longName) || !strings.Contains(listView, "…") {
+		t.Fatalf("non-log list content did not truncate:\n%s", listView)
 	}
 }
 
@@ -159,12 +263,21 @@ func TestWorkspaceHeaderUsesTopBorder(t *testing.T) {
 	if tasks < 0 || jobs <= tasks || path <= jobs {
 		t.Fatalf("top border does not contain ordered tabs and workspace:\n%s", header)
 	}
-	footer := lines[len(lines)-1]
+	footer := lines[len(lines)-2]
 	if !strings.HasPrefix(footer, "╰─ ") || !strings.Contains(footer, "tab switch") {
 		t.Fatalf("bottom border does not contain navigation controls:\n%s", footer)
 	}
-	if status := strings.Index(view, "Saved"); status < 0 || status >= strings.LastIndex(view, footer) {
-		t.Fatalf("status does not render above bottom-border controls:\n%s", view)
+	status := lines[len(lines)-1]
+	if !strings.Contains(status, "Saved") {
+		t.Fatalf("status does not render below the bottom border:\n%s", view)
+	}
+	styledStatus := strings.Split(styledView, "\n")[len(lines)-1]
+	if styledStatus != statusBarStyle.Render(status) {
+		t.Fatalf("status background does not span the full terminal width:\n%q", styledStatus)
+	}
+	if statusBarStyle.GetForeground() != inactiveTabStyle.GetForeground() ||
+		statusBarStyle.GetBackground() != inactiveTabStyle.GetBackground() {
+		t.Fatal("default status bar colors do not match the inactive tab")
 	}
 	if strings.Contains(view, "TASKRUNNER") {
 		t.Fatalf("view still contains the taskrunner title:\n%s", view)
@@ -177,20 +290,24 @@ func TestTabsRestoreScreenAndValues(t *testing.T) {
 	m := newModel(task.NewStore(t.TempDir()), nil)
 	m.resize(80, 24)
 	m.openTaskForm(task.Task{})
-	m.taskInputs[0].SetValue("draft task")
+	m.taskNameInput.SetValue("draft task")
+	m.setStatus("editing status")
 
 	updated, _ := m.updateMouse(mouseClickOn(t, m.View(), "Jobs"))
 	m = updated.(model)
 	if m.screen != screenJobs {
 		t.Fatalf("screen after switching to Jobs = %d, want jobs", m.screen)
 	}
+	if m.status != "" {
+		t.Fatalf("status after switching screens = %q, want empty", m.status)
+	}
 
 	job := daemon.Job{ID: "job-preserved", Name: "Preserved", Status: daemon.StatusRunning, Output: "output"}
 	m.openResult(job)
 	updated, _ = m.updateMouse(mouseClickOn(t, m.View(), "Tasks"))
 	m = updated.(model)
-	if m.screen != screenTask || m.taskInputs[0].Value() != "draft task" {
-		t.Fatalf("restored task state = screen %d, value %q", m.screen, m.taskInputs[0].Value())
+	if m.screen != screenTask || m.taskNameInput.Value() != "draft task" {
+		t.Fatalf("restored task state = screen %d, value %q", m.screen, m.taskNameInput.Value())
 	}
 
 	updated, _ = m.updateMouse(mouseClickOn(t, m.View(), "Jobs"))
@@ -238,6 +355,43 @@ func TestJobsTabListsEveryJobNewestFirst(t *testing.T) {
 	m = updated.(model)
 	if m.screen != screenJobs {
 		t.Fatalf("screen after clicking Jobs tab = %d, want jobs", m.screen)
+	}
+}
+
+func TestDeleteJobActionRemovesJobAndClosesOpenLog(t *testing.T) {
+	t.Parallel()
+
+	remaining := daemon.Job{
+		ID: "job-older-12345678", TaskID: "build.json", Name: "Build", Status: daemon.StatusSucceeded,
+	}
+	deleted := daemon.Job{
+		ID: "job-newer-87654321", TaskID: "build.json", Name: "Build", Status: daemon.StatusFailed,
+	}
+	m := newModel(task.NewStore(t.TempDir()), nil)
+	m.applyDaemonPoll(daemonPollMsg{
+		jobs:    []daemon.Job{remaining, deleted},
+		details: make(map[string]daemon.Job),
+	})
+	m.openResult(deleted)
+	m.jobScreen = screenResult
+	m.trackedJobs[deleted.ID] = struct{}{}
+
+	m.applyJobAction(jobActionMsg{action: "delete", job: deleted})
+
+	if len(m.jobs) != 1 || m.jobs[0].ID != remaining.ID {
+		t.Fatalf("jobs after deletion = %#v, want only %q", m.jobs, remaining.ID)
+	}
+	if m.screen != screenJobs || m.jobScreen != screenJobs || m.result.ID != "" {
+		t.Fatalf("open log after deletion = screen %d, saved screen %d, result %q", m.screen, m.jobScreen, m.result.ID)
+	}
+	if _, ok := m.trackedJobs[deleted.ID]; ok {
+		t.Fatalf("deleted job %q remains tracked", deleted.ID)
+	}
+	if m.latest["build.json"] != daemon.StatusSucceeded {
+		t.Fatalf("latest task status = %q, want succeeded", m.latest["build.json"])
+	}
+	if got, want := m.status, "Deleted job Build 87654321"; got != want {
+		t.Fatalf("deletion status = %q, want %q", got, want)
 	}
 }
 
@@ -317,10 +471,10 @@ func TestTaskFormArrowAndMouseNavigation(t *testing.T) {
 		t.Fatalf("down from name focus = %d, want 1", m.taskFocus)
 	}
 
-	updated, _ = m.updateTaskForm(tea.KeyMsg{Type: tea.KeyDown})
+	updated, _ = m.updateTaskForm(tea.KeyMsg{Type: tea.KeyTab})
 	m = updated.(model)
 	if m.taskFocus != 2 {
-		t.Fatalf("down from command focus = %d, want 2", m.taskFocus)
+		t.Fatalf("tab from command focus = %d, want 2", m.taskFocus)
 	}
 
 	updated, _ = m.updateTaskForm(tea.KeyMsg{Type: tea.KeyDown})
@@ -354,6 +508,43 @@ func TestTaskFormArrowAndMouseNavigation(t *testing.T) {
 	}
 }
 
+func TestTaskCommandEditorAcceptsAndSavesMultipleLines(t *testing.T) {
+	t.Parallel()
+
+	store := task.NewStore(t.TempDir())
+	m := newModel(store, nil)
+	m.resize(80, 24)
+	m.openTaskForm(task.Task{})
+	m.taskNameInput.SetValue("Multiline")
+
+	updated, _ := m.updateTaskForm(tea.KeyMsg{Type: tea.KeyDown})
+	m = updated.(model)
+	for _, msg := range []tea.KeyMsg{
+		{Type: tea.KeyRunes, Runes: []rune("printf first")},
+		{Type: tea.KeyEnter},
+		{Type: tea.KeyRunes, Runes: []rune("printf second")},
+	} {
+		updated, _ = m.updateTaskForm(msg)
+		m = updated.(model)
+	}
+	if got, want := m.taskCommandInput.Value(), "printf first\nprintf second"; got != want {
+		t.Fatalf("multiline command = %q, want %q", got, want)
+	}
+	if m.taskFocus != 1 {
+		t.Fatalf("focus after command newline = %d, want command editor", m.taskFocus)
+	}
+
+	updated, _ = m.updateTaskForm(tea.KeyMsg{Type: tea.KeyF2})
+	m = updated.(model)
+	items, err := store.Load()
+	if err != nil {
+		t.Fatalf("load saved task: %v", err)
+	}
+	if len(items) != 1 || items[0].Command != "printf first\nprintf second" {
+		t.Fatalf("saved tasks = %#v, want multiline command", items)
+	}
+}
+
 func TestTaskFormF2SavesAndReordersFields(t *testing.T) {
 	t.Parallel()
 
@@ -361,8 +552,8 @@ func TestTaskFormF2SavesAndReordersFields(t *testing.T) {
 	m := newModel(store, nil)
 	m.resize(80, 24)
 	m.openTaskForm(task.Task{})
-	m.taskInputs[0].SetValue("Ordered task")
-	m.taskInputs[1].SetValue("printf '%s %s' {{second}} {{first}}")
+	m.taskNameInput.SetValue("Ordered task")
+	m.taskCommandInput.SetValue("printf '%s %s' {{second}} {{first}}")
 	m.formFields = []task.Field{
 		{Key: "first", Label: "First", Type: task.FieldText},
 		{Key: "second", Label: "Second", Type: task.FieldText},
@@ -633,8 +824,8 @@ func TestStandaloneTaskFormQuitsAfterCancelAndSave(t *testing.T) {
 		t.Fatalf("standalone cancel screen = %d, want task form", m.screen)
 	}
 
-	m.taskInputs[0].SetValue("Saved task")
-	m.taskInputs[1].SetValue("printf saved")
+	m.taskNameInput.SetValue("Saved task")
+	m.taskCommandInput.SetValue("printf saved")
 	updated, cmd = m.saveTaskForm()
 	m = updated.(model)
 	if cmd == nil {

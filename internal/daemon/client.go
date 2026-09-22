@@ -68,10 +68,6 @@ func (c *Client) Job(id string, outputOffset int) (Job, error) {
 	return *result.Job, nil
 }
 
-func (c *Client) DeleteOutput(id string) (Job, error) {
-	return c.jobAction("delete_output", id)
-}
-
 func (c *Client) Cancel(id string) (Job, error) {
 	return c.jobAction("cancel", id)
 }

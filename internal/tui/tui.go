@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/bubbles/filepicker"
+	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
@@ -29,18 +30,24 @@ const (
 )
 
 var (
-	accentColor      = lipgloss.Color("63")
-	accentStyle      = lipgloss.NewStyle().Foreground(accentColor).Bold(true)
-	borderStyle      = lipgloss.NewStyle().Foreground(accentColor)
-	mutedStyle       = lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
-	cursorStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("212")).Bold(true)
-	selectedStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("230")).Background(lipgloss.Color("57")).Bold(true).Padding(0, 1)
-	activeTabStyle   = selectedStyle
-	inactiveTabStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("250")).Background(lipgloss.Color("236")).Padding(0, 1)
-	stepStyle        = selectedStyle
-	errorStyle       = lipgloss.NewStyle().Foreground(lipgloss.Color("196"))
-	okStyle          = lipgloss.NewStyle().Foreground(lipgloss.Color("42"))
-	panelStyle       = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(accentColor).Padding(1, 2)
+	accentColor         = lipgloss.Color("63")
+	accentStyle         = lipgloss.NewStyle().Foreground(accentColor).Bold(true)
+	borderStyle         = lipgloss.NewStyle().Foreground(accentColor)
+	mutedStyle          = lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
+	cursorStyle         = lipgloss.NewStyle().Foreground(lipgloss.Color("212")).Bold(true)
+	selectedStyle       = lipgloss.NewStyle().Foreground(lipgloss.Color("230")).Background(lipgloss.Color("57")).Bold(true).Padding(0, 1)
+	activeTabStyle      = selectedStyle
+	inactiveTabStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("250")).Background(lipgloss.Color("236")).Padding(0, 1)
+	stepStyle           = selectedStyle
+	errorStyle          = lipgloss.NewStyle().Foreground(lipgloss.Color("196"))
+	okStyle             = lipgloss.NewStyle().Foreground(lipgloss.Color("42"))
+	panelStyle          = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(accentColor).Padding(1, 2)
+	statusBarStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("250")).Background(lipgloss.Color("236"))
+	statusBarErrorStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("230")).Background(lipgloss.Color("196")).Bold(true)
+	jobQueuedStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("230")).Background(accentColor).Bold(true).Padding(0, 1)
+	jobSucceededStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("0")).Background(lipgloss.Color("42")).Bold(true).Padding(0, 1)
+	jobFailedStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("230")).Background(lipgloss.Color("196")).Bold(true).Padding(0, 1)
+	jobCanceledStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("255")).Background(lipgloss.Color("241")).Bold(true).Padding(0, 1)
 )
 
 var fieldTypes = []task.FieldType{
@@ -103,13 +110,15 @@ type model struct {
 	width       int
 	height      int
 
-	taskInputs     [2]textinput.Model
-	taskFocus      int
-	formFields     []task.Field
-	formJobPolicy  task.JobPolicy
-	fieldCursor    int
-	editingFile    string
-	standaloneForm bool
+	taskNameInput    textinput.Model
+	taskCommandInput textarea.Model
+	taskViewport     viewport.Model
+	taskFocus        int
+	formFields       []task.Field
+	formJobPolicy    task.JobPolicy
+	fieldCursor      int
+	editingFile      string
+	standaloneForm   bool
 
 	fieldInputs     [3]textinput.Model
 	fieldFocus      int
@@ -135,25 +144,33 @@ type model struct {
 
 func newModel(store *task.Store, tasks []task.Task) model {
 	name := newInput("Build project", 100)
-	command := newInput("go build ./...", 1000)
+	command := textarea.New()
+	command.Placeholder = "go build ./..."
+	command.Prompt = ""
+	command.ShowLineNumbers = false
+	command.CharLimit = 1000
+	command.SetHeight(3)
 	key := newInput("environment", 50)
 	label := newInput("Environment", 100)
 	options := newInput("development, staging, production", 1000)
 	resultViewport := viewport.New(1, 1)
+	taskViewport := viewport.New(1, 1)
 
 	return model{
-		store:          store,
-		daemon:         daemon.NewClient(store.Workspace()),
-		tasks:          tasks,
-		running:        make(map[string]int),
-		queued:         make(map[string]int),
-		latest:         make(map[string]daemon.Status),
-		trackedJobs:    make(map[string]struct{}),
-		jobScreen:      screenJobs,
-		taskInputs:     [2]textinput.Model{name, command},
-		fieldInputs:    [3]textinput.Model{key, label, options},
-		editingField:   -1,
-		resultViewport: resultViewport,
+		store:            store,
+		daemon:           daemon.NewClient(store.Workspace()),
+		tasks:            tasks,
+		running:          make(map[string]int),
+		queued:           make(map[string]int),
+		latest:           make(map[string]daemon.Status),
+		trackedJobs:      make(map[string]struct{}),
+		jobScreen:        screenJobs,
+		taskNameInput:    name,
+		taskCommandInput: command,
+		taskViewport:     taskViewport,
+		fieldInputs:      [3]textinput.Model{key, label, options},
+		editingField:     -1,
+		resultViewport:   resultViewport,
 	}
 }
 
@@ -170,9 +187,8 @@ func (m *model) resize(width, height int) {
 	m.height = height
 
 	inputWidth := max(1, m.contentWidth())
-	for i := range m.taskInputs {
-		m.taskInputs[i].Width = inputWidth
-	}
+	m.taskNameInput.Width = max(1, inputWidth-1)
+	m.resizeTaskForm()
 	for i := range m.fieldInputs {
 		m.fieldInputs[i].Width = inputWidth
 	}
@@ -194,7 +210,41 @@ func (m model) contentHeight() int {
 	if height <= 0 {
 		height = 40
 	}
-	return max(1, height-panelStyle.GetVerticalFrameSize())
+	return max(1, height-panelStyle.GetVerticalFrameSize()-1)
+}
+
+func (m *model) resizeTaskForm() {
+	width := max(1, m.contentWidth()-1)
+	m.taskViewport.Width = width
+	m.taskViewport.Height = m.contentHeight()
+	m.taskCommandInput.SetWidth(width)
+	m.taskCommandInput.SetHeight(taskCommandVisualHeight(m.taskCommandInput.Value(), width))
+}
+
+func taskCommandVisualHeight(command string, width int) int {
+	if command == "" {
+		return 1
+	}
+	wrapped := ansi.Wrap(command, max(1, width), " ")
+	return max(1, strings.Count(wrapped, "\n")+1)
+}
+
+func (m model) taskCommandView() string {
+	lines := strings.Split(m.taskCommandInput.View(), "\n")
+	return strings.Join(lines[:min(m.taskCommandInput.Height(), len(lines))], "\n")
+}
+
+func scrollBar(height int, scrollable bool, percent float64) string {
+	lines := make([]string, max(1, height))
+	if !scrollable {
+		return strings.Join(lines, "\n")
+	}
+	thumb := int(percent*float64(len(lines)-1) + 0.5)
+	for i := range lines {
+		lines[i] = mutedStyle.Render("│")
+	}
+	lines[thumb] = accentStyle.Render("█")
+	return strings.Join(lines, "\n")
 }
 
 func (m model) filePickerHeight() int {
@@ -203,12 +253,9 @@ func (m model) filePickerHeight() int {
 
 func (m *model) resizeResultViewport() {
 	atBottom := m.resultViewport.AtBottom()
-	m.resultViewport.Width = m.contentWidth()
-	chromeHeight := 2 // Title and status.
+	m.resultViewport.Width = max(1, m.contentWidth()-1)
+	chromeHeight := 1 // Job status and task name.
 	if m.result.StorageError != "" {
-		chromeHeight++
-	}
-	if m.showResultCommand() {
 		chromeHeight++
 	}
 	if m.gap() == "\n\n" {
@@ -218,10 +265,6 @@ func (m *model) resizeResultViewport() {
 	if atBottom {
 		m.resultViewport.GotoBottom()
 	}
-}
-
-func (m model) showResultCommand() bool {
-	return m.contentHeight() >= 8 && m.result.Command != ""
 }
 
 func (m model) gap() string {
@@ -380,9 +423,9 @@ func (m model) updateMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		if !m.mouseLineIsLastMatch(event.Y, "esc back") {
 			return m, nil
 		}
-		switch optionAtX(line, event.X-3, []string{"esc back", "c cancel", "r rerun", "d delete output"}) {
+		switch optionAtX(line, event.X-3, []string{"esc back", "c cancel", "r rerun", "d delete job"}) {
 		case 0:
-			m.screen = screenJobs
+			m.showScreen(screenJobs)
 			return m, nil
 		case 1:
 			return m.updateResult(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'c'}})
@@ -449,7 +492,7 @@ func (m model) clickTaskList(line string, x int) (tea.Model, tea.Cmd) {
 
 func (m model) clickJobs(line string, x int) (tea.Model, tea.Cmd) {
 	if strings.Contains(line, "enter log") {
-		switch optionAtX(line, x-3, []string{"enter log", "c cancel", "r rerun", "d delete output", "q quit"}) {
+		switch optionAtX(line, x-3, []string{"enter log", "c cancel", "r rerun", "d delete job", "q quit"}) {
 		case 0:
 			return m.updateJobs(tea.KeyMsg{Type: tea.KeyEnter})
 		case 1:
@@ -499,13 +542,16 @@ func (m model) topLevelTabAt(y, x int) (screen, bool) {
 
 func (m model) clickTaskForm(line string, x int) (tea.Model, tea.Cmd) {
 	switch {
-	case line == "Name" || containsNonEmpty(line, m.taskInputs[0].Value()):
+	case strings.HasPrefix(line, "Name") || containsNonEmpty(line, m.taskNameInput.Value()):
 		m.taskFocus = 0
-		m.taskInputs[0].SetCursor(max(0, x-3))
+		m.taskNameInput.SetCursor(max(0, x-3))
 		return m, m.focusTaskControl()
-	case line == "Command template" || containsNonEmpty(line, m.taskInputs[1].Value()):
+	case strings.HasPrefix(line, "Command") || containsValueLine(line, m.taskCommandInput.Value()):
 		m.taskFocus = 1
-		m.taskInputs[1].SetCursor(max(0, x-3))
+		return m, m.focusTaskControl()
+	case strings.HasPrefix(line, "Job policy"):
+		m.taskFocus = 2
+		m.moveJobPolicy(1)
 		return m, m.focusTaskControl()
 	case strings.Contains(line, "Sequential") || strings.Contains(line, "Parallel") || strings.Contains(line, "Cancel previous"):
 		if selected := optionAtX(line, x-3, jobPolicyLabels); selected >= 0 {
@@ -513,7 +559,7 @@ func (m model) clickTaskForm(line string, x int) (tea.Model, tea.Cmd) {
 			m.taskFocus = 2
 			return m, m.focusTaskControl()
 		}
-	case line == "Fields" || strings.Contains(line, "No fields."):
+	case strings.HasPrefix(line, "Fields") || strings.Contains(line, "No fields."):
 		m.taskFocus = 3
 		return m, m.focusTaskControl()
 	}
@@ -597,6 +643,15 @@ func containsNonEmpty(text, value string) bool {
 	return value != "" && strings.Contains(text, value)
 }
 
+func containsValueLine(text, value string) bool {
+	for line := range strings.SplitSeq(value, "\n") {
+		if containsNonEmpty(text, line) {
+			return true
+		}
+	}
+	return false
+}
+
 func optionAtX(line string, x int, options []string) int {
 	for i, option := range options {
 		start := strings.Index(line, option)
@@ -671,6 +726,9 @@ func (m model) updateTaskForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.taskFocus = (m.taskFocus + 3) % 4
 			return m, m.focusTaskControl()
 		case "up":
+			if m.taskFocus == 1 {
+				break
+			}
 			if m.taskFocus == 3 && m.fieldCursor > 0 {
 				m.fieldCursor--
 				return m, nil
@@ -680,6 +738,9 @@ func (m model) updateTaskForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, m.focusTaskControl()
 			}
 		case "down":
+			if m.taskFocus == 1 {
+				break
+			}
 			if m.taskFocus == 3 {
 				if m.fieldCursor < len(m.formFields)-1 {
 					m.fieldCursor++
@@ -689,6 +750,9 @@ func (m model) updateTaskForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.taskFocus++
 			return m, m.focusTaskControl()
 		case "enter":
+			if m.taskFocus == 1 {
+				break
+			}
 			if m.taskFocus < 3 {
 				m.taskFocus++
 				return m, m.focusTaskControl()
@@ -756,7 +820,12 @@ func (m model) updateTaskForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	var cmd tea.Cmd
-	m.taskInputs[m.taskFocus], cmd = m.taskInputs[m.taskFocus].Update(msg)
+	if m.taskFocus == 0 {
+		m.taskNameInput, cmd = m.taskNameInput.Update(msg)
+	} else {
+		m.taskCommandInput, cmd = m.taskCommandInput.Update(msg)
+		m.resizeTaskForm()
+	}
 	return m, cmd
 }
 
@@ -776,45 +845,46 @@ func jobPolicyIndex(policy task.JobPolicy) int {
 }
 
 func (m *model) openTaskForm(item task.Task) {
-	m.screen = screenTask
+	m.showScreen(screenTask)
 	m.editingFile = item.File
-	m.taskInputs[0].SetValue(item.Name)
-	m.taskInputs[1].SetValue(item.Command)
+	m.taskNameInput.SetValue(item.Name)
+	m.taskCommandInput.SetValue(item.Command)
+	m.resizeTaskForm()
 	m.formFields = cloneFields(item.Fields)
 	m.formJobPolicy = item.JobPolicy
 	m.taskFocus = 0
 	m.fieldCursor = 0
-	m.status = ""
 	m.focusTaskControl()
 }
 
 func (m *model) closeTaskForm() {
-	m.screen = screenList
+	m.showScreen(screenList)
 	m.editingFile = ""
 	m.formFields = nil
 	m.formJobPolicy = task.JobSequential
-	for i := range m.taskInputs {
-		m.taskInputs[i].Blur()
-		m.taskInputs[i].SetValue("")
-	}
+	m.taskNameInput.Blur()
+	m.taskNameInput.SetValue("")
+	m.taskCommandInput.Blur()
+	m.taskCommandInput.SetValue("")
 }
 
 func (m *model) focusTaskControl() tea.Cmd {
-	var cmd tea.Cmd
-	for i := range m.taskInputs {
-		if i == m.taskFocus {
-			cmd = m.taskInputs[i].Focus()
-			continue
-		}
-		m.taskInputs[i].Blur()
+	m.taskNameInput.Blur()
+	m.taskCommandInput.Blur()
+	switch m.taskFocus {
+	case 0:
+		return m.taskNameInput.Focus()
+	case 1:
+		return m.taskCommandInput.Focus()
+	default:
+		return nil
 	}
-	return cmd
 }
 
 func (m model) saveTaskForm() (tea.Model, tea.Cmd) {
 	item := task.Task{
-		Name:      m.taskInputs[0].Value(),
-		Command:   m.taskInputs[1].Value(),
+		Name:      m.taskNameInput.Value(),
+		Command:   m.taskCommandInput.Value(),
 		Fields:    cloneFields(m.formFields),
 		JobPolicy: m.formJobPolicy,
 	}
@@ -827,11 +897,11 @@ func (m model) saveTaskForm() (tea.Model, tea.Cmd) {
 		m.setError(err)
 		return m, nil
 	}
-	m.setStatus(fmt.Sprintf("Saved %s", saved.Name))
 	if m.standaloneForm {
 		return m, tea.Quit
 	}
 	m.closeTaskForm()
+	m.setStatus(fmt.Sprintf("Saved %s", saved.Name))
 	for i := range m.tasks {
 		if m.tasks[i].File == saved.File {
 			m.cursor = i
@@ -845,7 +915,7 @@ func (m model) updateFieldForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if key, ok := msg.(tea.KeyMsg); ok {
 		switch key.String() {
 		case "esc":
-			m.screen = screenTask
+			m.showScreen(screenTask)
 			m.taskFocus = 3
 			return m, m.focusTaskControl()
 		case "ctrl+s", "enter":
@@ -907,7 +977,7 @@ func (m model) updateFieldForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *model) openFieldForm(index int) {
-	m.screen = screenField
+	m.showScreen(screenField)
 	m.editingField = index
 	m.fieldFocus = 0
 	m.fieldTypeCursor = 0
@@ -987,7 +1057,7 @@ func (m model) saveFieldForm() (tea.Model, tea.Cmd) {
 	if m.editingField < 0 {
 		m.fieldCursor = len(fields) - 1
 	}
-	m.screen = screenTask
+	m.showScreen(screenTask)
 	m.taskFocus = 3
 	m.status = ""
 	return m, m.focusTaskControl()
@@ -1002,7 +1072,7 @@ func (m model) startRun(item task.Task) (tea.Model, tea.Cmd) {
 	if len(item.Fields) == 0 {
 		return m.executeRun()
 	}
-	m.screen = screenRun
+	m.showScreen(screenRun)
 	return m, m.prepareRunField()
 }
 
@@ -1056,7 +1126,7 @@ func (m model) updateRunForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if key, ok := msg.(tea.KeyMsg); ok {
 		switch key.String() {
 		case "esc":
-			m.screen = screenList
+			m.showScreen(screenList)
 			m.setStatus(fmt.Sprintf("Cancelled %s", m.runTask.Name))
 			return m, nil
 		case "shift+tab", "ctrl+left":
@@ -1144,7 +1214,7 @@ func (m model) updateRunForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.confirmationYes = false
 		case "enter":
 			if !m.confirmationYes && !field.Optional {
-				m.screen = screenList
+				m.showScreen(screenList)
 				m.setStatus(fmt.Sprintf("Cancelled %s", m.runTask.Name))
 				return m, nil
 			}
@@ -1153,7 +1223,7 @@ func (m model) updateRunForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	default:
-		m.screen = screenList
+		m.showScreen(screenList)
 		m.setError(fmt.Errorf("unknown field type %q", field.Type))
 		return m, nil
 	}
@@ -1223,11 +1293,11 @@ func (m model) previousRun() (tea.Model, tea.Cmd) {
 func (m model) executeRun() (tea.Model, tea.Cmd) {
 	command, err := m.runTask.Render(m.runValues)
 	if err != nil {
-		m.screen = screenList
+		m.showScreen(screenList)
 		m.setError(err)
 		return m, nil
 	}
-	m.screen = screenList
+	m.showScreen(screenList)
 	m.status = ""
 	m.statusError = false
 	if m.runTask.File != "" {
@@ -1279,27 +1349,21 @@ func (m *model) setStatus(status string) {
 	m.statusError = false
 }
 
+func (m *model) showScreen(next screen) {
+	if m.screen == next {
+		return
+	}
+	m.screen = next
+	m.status = ""
+	m.statusError = false
+}
+
 func (m *model) applyDaemonPoll(msg daemonPollMsg) {
 	if msg.err != nil {
 		m.setError(fmt.Errorf("poll daemon: %w", msg.err))
 		return
 	}
-	m.jobs = msg.jobs
-	clear(m.running)
-	clear(m.queued)
-	clear(m.latest)
-	for _, job := range m.jobs {
-		m.latest[job.TaskID] = job.Status
-		switch job.Status {
-		case daemon.StatusRunning:
-			m.running[job.TaskID]++
-		case daemon.StatusQueued:
-			m.queued[job.TaskID]++
-		}
-	}
-	if m.jobCursor >= len(m.jobs) && m.jobCursor > 0 {
-		m.jobCursor = len(m.jobs) - 1
-	}
+	m.setJobs(msg.jobs)
 
 	for _, job := range m.jobs {
 		detail, ok := msg.details[job.ID]
@@ -1315,6 +1379,25 @@ func (m *model) applyDaemonPoll(msg daemonPollMsg) {
 				m.openResult(detail)
 			}
 		}
+	}
+}
+
+func (m *model) setJobs(jobs []daemon.Job) {
+	m.jobs = jobs
+	clear(m.running)
+	clear(m.queued)
+	clear(m.latest)
+	for _, job := range m.jobs {
+		m.latest[job.TaskID] = job.Status
+		switch job.Status {
+		case daemon.StatusRunning:
+			m.running[job.TaskID]++
+		case daemon.StatusQueued:
+			m.queued[job.TaskID]++
+		}
+	}
+	if m.jobCursor >= len(m.jobs) && m.jobCursor > 0 {
+		m.jobCursor = len(m.jobs) - 1
 	}
 }
 
@@ -1337,7 +1420,7 @@ func (m *model) openResult(job daemon.Job) {
 	m.result = job
 	m.setResultContent()
 	m.resultViewport.GotoBottom()
-	m.screen = screenResult
+	m.showScreen(screenResult)
 }
 
 func (m *model) setResultContent() {
@@ -1348,7 +1431,15 @@ func (m *model) setResultContent() {
 	if output == "" {
 		output = "(no output)"
 	}
-	m.resultViewport.SetContent(output)
+
+	var content strings.Builder
+	if m.result.Command != "" {
+		script := ansi.Hardwrap("$ "+m.result.Command, m.resultViewport.Width, true)
+		content.WriteString(mutedStyle.Render(script))
+		content.WriteString("\n\n")
+	}
+	content.WriteString(output)
+	m.resultViewport.SetContent(content.String())
 	m.resizeResultViewport()
 }
 
@@ -1376,14 +1467,10 @@ func (m model) jobAction(action, id string) tea.Cmd {
 		case "rerun":
 			job, err = client.Rerun(id)
 		case "delete":
-			job, err = client.DeleteOutput(id)
+			job, err = client.Remove(id)
 		}
 		if err != nil {
-			operation := action + " job"
-			if action == "delete" {
-				operation = "delete job output"
-			}
-			err = fmt.Errorf("%s: %w", operation, err)
+			err = fmt.Errorf("%s job: %w", action, err)
 		}
 		return jobActionMsg{action: action, job: job, err: err}
 	}
@@ -1395,8 +1482,26 @@ func (m *model) applyJobAction(msg jobActionMsg) {
 		m.jobs = append(m.jobs, msg.job)
 		m.trackedJobs[msg.job.ID] = struct{}{}
 		m.jobCursor = 0
+		m.showScreen(screenJobs)
 		m.setStatus(fmt.Sprintf("Started new job for %s", msg.job.Name))
-		m.screen = screenJobs
+	case "delete":
+		for i := range m.jobs {
+			if m.jobs[i].ID != msg.job.ID {
+				continue
+			}
+			last := len(m.jobs) - 1
+			copy(m.jobs[i:], m.jobs[i+1:])
+			m.jobs[last] = daemon.Job{}
+			m.setJobs(m.jobs[:last])
+			break
+		}
+		delete(m.trackedJobs, msg.job.ID)
+		if m.result.ID == msg.job.ID {
+			m.result = daemon.Job{}
+			m.showScreen(screenJobs)
+			m.jobScreen = screenJobs
+		}
+		m.setStatus(fmt.Sprintf("Deleted job %s %s", msg.job.Name, msg.job.ShortID()))
 	default:
 		for i := range m.jobs {
 			if m.jobs[i].ID == msg.job.ID {
@@ -1404,15 +1509,7 @@ func (m *model) applyJobAction(msg jobActionMsg) {
 				break
 			}
 		}
-		if msg.action == "delete" {
-			if m.result.ID == msg.job.ID {
-				m.result = msg.job
-				m.setResultContent()
-			}
-			m.setStatus(fmt.Sprintf("Deleted output for %s %s", msg.job.Name, msg.job.ShortID()))
-		} else {
-			m.setStatus(fmt.Sprintf("Cancel requested for %s %s", msg.job.Name, msg.job.ShortID()))
-		}
+		m.setStatus(fmt.Sprintf("Cancel requested for %s %s", msg.job.Name, msg.job.ShortID()))
 	}
 }
 
@@ -1466,7 +1563,7 @@ func (m model) updateResult(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if key, ok := msg.(tea.KeyMsg); ok {
 		switch key.String() {
 		case "esc":
-			m.screen = screenJobs
+			m.showScreen(screenJobs)
 			return m, nil
 		case "home", "g":
 			m.resultViewport.GotoTop()
@@ -1538,9 +1635,9 @@ func (m *model) switchTab(target screen) {
 		m.jobScreen = m.screen
 	}
 	if targetTab == screenList {
-		m.screen = m.taskScreen
+		m.showScreen(m.taskScreen)
 	} else {
-		m.screen = m.jobScreen
+		m.showScreen(m.jobScreen)
 	}
 }
 
@@ -1570,10 +1667,11 @@ func (m model) workspaceHeader(active screen) string {
 func (m model) renderWorkspacePanel(content string, active screen, footer string) string {
 	panel := m.renderPanelWithFooter(content, footer)
 	_, rest, ok := strings.Cut(panel, "\n")
-	if !ok {
-		return m.workspaceHeader(active)
+	view := m.workspaceHeader(active)
+	if ok {
+		view += "\n" + rest
 	}
-	return m.workspaceHeader(active) + "\n" + rest
+	return view + "\n" + m.statusBar()
 }
 
 func (m model) listView() string {
@@ -1614,7 +1712,6 @@ func (m model) listView() string {
 		}
 	}
 
-	body.WriteString(m.statusView())
 	return m.renderWorkspacePanel(
 		body.String(),
 		screenList,
@@ -1682,11 +1779,10 @@ func (m model) jobsView() string {
 			}
 		}
 	}
-	body.WriteString(m.statusView())
 	return m.renderWorkspacePanel(
 		body.String(),
 		screenJobs,
-		"tab switch • enter log • c cancel • r rerun • d delete output • q quit",
+		"tab switch • enter log • c cancel • r rerun • d delete job • q quit",
 	)
 }
 
@@ -1704,128 +1800,122 @@ func visibleRange(total, current, limit int) (int, int) {
 	return start, start + limit
 }
 
+func (m model) taskFieldLine(index int) string {
+	field := m.formFields[index]
+	mode := "argument"
+	if field.Raw {
+		mode = "RAW"
+	}
+	requirement := "required"
+	if field.Optional {
+		requirement = "optional"
+	}
+	line := fmt.Sprintf("%d. %s (%s, %s, %s → {{%s}})", index+1, field.Label, field.Type, requirement, mode, field.Key)
+	if m.taskFocus == 3 && index == m.fieldCursor {
+		return selectedStyle.Render("› " + line)
+	}
+	return "  " + line
+}
+
 func (m model) taskFormView() string {
-	title := "NEW TASK"
-	if m.editingFile != "" {
-		title = "EDIT TASK"
+	content, focusLine := m.taskFormContent()
+	form := m.taskViewport
+	form.Width = max(1, m.contentWidth()-1)
+	form.Height = m.contentHeight()
+	form.SetContent(content)
+	switch {
+	case focusLine < form.YOffset:
+		form.SetYOffset(focusLine)
+	case focusLine >= form.YOffset+form.Height:
+		form.SetYOffset(focusLine - form.Height + 1)
 	}
-
-	if m.contentHeight() < 15 {
-		return m.compactTaskFormView(title)
-	}
-
-	var body strings.Builder
-	body.WriteString(accentStyle.Render(title))
-	body.WriteString(m.gap())
-	body.WriteString(taskStepTitle("Name", m.taskFocus == 0))
-	body.WriteByte('\n')
-	body.WriteString(m.taskInputs[0].View())
-	body.WriteString(m.gap())
-	body.WriteString(taskStepTitle("Command template", m.taskFocus == 1))
-	body.WriteByte('\n')
-	body.WriteString(m.taskInputs[1].View())
-	body.WriteString("\n")
-	body.WriteString(mutedStyle.Render("Use {{field_key}} where a runtime value belongs."))
-	body.WriteString(m.gap())
-	body.WriteString(taskStepTitle("Job policy", m.taskFocus == 2))
-	body.WriteByte('\n')
-	body.WriteString(m.pickerRow(jobPolicyLabels, jobPolicyIndex(m.formJobPolicy)))
-	body.WriteString(m.gap())
-	body.WriteString(taskStepTitle("Fields", m.taskFocus == 3))
-	body.WriteByte('\n')
-	if len(m.formFields) == 0 {
-		empty := mutedStyle.Render("No fields. Press a or enter to add one.")
-		if m.taskFocus == 3 {
-			empty = selectedStyle.Render("› No fields. Press a or enter to add one.")
-		}
-		body.WriteString(empty)
-	} else {
-		start, end := visibleRange(len(m.formFields), m.fieldCursor, max(1, m.contentHeight()-15))
-		if start > 0 {
-			body.WriteString(mutedStyle.Render(fmt.Sprintf("↑ %d more", start)))
-			body.WriteByte('\n')
-		}
-		for i := start; i < end; i++ {
-			field := m.formFields[i]
-			mode := "argument"
-			if field.Raw {
-				mode = "RAW"
-			}
-			requirement := "required"
-			if field.Optional {
-				requirement = "optional"
-			}
-			line := fmt.Sprintf("  %d. %s (%s, %s, %s → {{%s}})", i+1, field.Label, field.Type, requirement, mode, field.Key)
-			if m.taskFocus == 3 && i == m.fieldCursor {
-				line = selectedStyle.Render("› " + strings.TrimSpace(line))
-			}
-			body.WriteString(line)
-			body.WriteByte('\n')
-		}
-		if end < len(m.formFields) {
-			body.WriteString(mutedStyle.Render(fmt.Sprintf("↓ %d more", len(m.formFields)-end)))
-			body.WriteByte('\n')
-		}
-	}
-	body.WriteString(m.statusView())
+	lineCount := strings.Count(content, "\n") + 1
+	view := lipgloss.JoinHorizontal(
+		lipgloss.Top,
+		form.View(),
+		scrollBar(form.Height, lineCount > form.Height, form.ScrollPercent()),
+	)
 	return m.renderWorkspacePanel(
-		body.String(),
+		view,
 		screenTask,
 		"f6 switch tab • tab section • ←/→ policy • [/] reorder • a add • e edit • d delete • f2 save • esc cancel",
 	)
 }
 
-func (m model) compactTaskFormView(title string) string {
-	var body strings.Builder
-	body.WriteString(accentStyle.Render(title))
-	body.WriteString(m.gap())
-
-	switch m.taskFocus {
-	case 0:
-		body.WriteString(taskStepTitle("Name", true))
-		body.WriteByte('\n')
-		body.WriteString(m.taskInputs[0].View())
-	case 1:
-		body.WriteString(taskStepTitle("Command template", true))
-		body.WriteByte('\n')
-		body.WriteString(m.taskInputs[1].View())
-	case 2:
-		body.WriteString(taskStepTitle("Job policy", true))
-		body.WriteByte('\n')
-		body.WriteString(m.pickerRow(jobPolicyLabels, jobPolicyIndex(m.formJobPolicy)))
-	case 3:
-		body.WriteString(taskStepTitle("Fields", true))
-		body.WriteByte('\n')
-		if len(m.formFields) == 0 {
-			body.WriteString(selectedStyle.Render("› No fields. Press a or enter to add one."))
-			break
-		}
-		field := m.formFields[m.fieldCursor]
-		mode := "argument"
-		if field.Raw {
-			mode = "RAW"
-		}
-		requirement := "required"
-		if field.Optional {
-			requirement = "optional"
-		}
-		body.WriteString(selectedStyle.Render(fmt.Sprintf(
-			"› %d. %s (%s, %s, %s → {{%s}})",
-			m.fieldCursor+1,
-			field.Label,
-			field.Type,
-			requirement,
-			mode,
-			field.Key,
-		)))
+func (m model) taskFormContent() (string, int) {
+	title := "NEW TASK"
+	if m.editingFile != "" {
+		title = "EDIT TASK"
 	}
 
-	body.WriteString(m.statusView())
-	return m.renderWorkspacePanel(
-		body.String(),
-		screenTask,
-		"f6 switch tab • tab section • ←/→ policy • [/] reorder • f2 save • esc cancel",
-	)
+	var body strings.Builder
+	line := 0
+	write := func(value string) {
+		body.WriteString(value)
+		line += strings.Count(value, "\n")
+	}
+	focusLine := 0
+
+	write(accentStyle.Render(title))
+	write(m.gap())
+
+	if m.taskFocus == 0 {
+		focusLine = line
+	}
+	write(taskStepTitle("Name", m.taskFocus == 0))
+	write("\n")
+	write(m.taskNameInput.View())
+	write(m.gap())
+
+	write(taskStepTitle("Command template", m.taskFocus == 1))
+	write("\n")
+	if m.taskFocus == 1 {
+		focusLine = line + m.taskCommandCursorLine()
+	}
+	write(m.taskCommandView())
+	write("\n")
+	write(mutedStyle.Render("Use {{field_key}} where a runtime value belongs."))
+	write(m.gap())
+
+	if m.taskFocus == 2 {
+		focusLine = line
+	}
+	write(taskStepTitle("Job policy", m.taskFocus == 2))
+	write("\n")
+	write(m.pickerRow(jobPolicyLabels, jobPolicyIndex(m.formJobPolicy)))
+	write(m.gap())
+
+	write(taskStepTitle("Fields", m.taskFocus == 3))
+	write("\n")
+	if len(m.formFields) == 0 {
+		if m.taskFocus == 3 {
+			focusLine = line
+			write(selectedStyle.Render("› No fields. Press a or enter to add one."))
+		} else {
+			write(mutedStyle.Render("No fields. Press a or enter to add one."))
+		}
+		return body.String(), focusLine
+	}
+	for i := range m.formFields {
+		if m.taskFocus == 3 && i == m.fieldCursor {
+			focusLine = line
+		}
+		write(m.taskFieldLine(i))
+		if i < len(m.formFields)-1 {
+			write("\n")
+		}
+	}
+	return body.String(), focusLine
+}
+
+func (m model) taskCommandCursorLine() int {
+	lines := strings.Split(m.taskCommandInput.Value(), "\n")
+	current := min(m.taskCommandInput.Line(), len(lines)-1)
+	line := 0
+	for i := 0; i < current; i++ {
+		line += taskCommandVisualHeight(lines[i], m.taskCommandInput.Width())
+	}
+	return line + m.taskCommandInput.LineInfo().RowOffset
 }
 
 func taskStepTitle(title string, active bool) string {
@@ -1914,7 +2004,6 @@ func (m model) fieldFormView() string {
 		requirement = 1
 	}
 	body.WriteString(m.pickerRow([]string{"Required", "Optional"}, requirement))
-	body.WriteString(m.statusView())
 	return m.renderWorkspacePanel(
 		body.String(),
 		screenField,
@@ -1993,25 +2082,22 @@ func (m model) runFormView() string {
 			help = "←/→ choose • enter continue • shift+tab back • esc cancel"
 		}
 	}
-	body.WriteString(m.statusView())
 	return m.renderWorkspacePanel(body.String(), screenRun, "f6 switch tab • "+help)
 }
 
 func (m model) resultView() string {
 	var body strings.Builder
-	body.WriteString(accentStyle.Render("JOB LOG"))
-	body.WriteByte('\n')
 	status := strings.ToUpper(string(m.result.Status))
+	style := jobQueuedStyle
 	switch m.result.Status {
 	case daemon.StatusFailed:
-		body.WriteString(errorStyle.Render(status))
+		style = jobFailedStyle
 	case daemon.StatusSucceeded:
-		body.WriteString(okStyle.Render(status))
+		style = jobSucceededStyle
 	case daemon.StatusCanceled:
-		body.WriteString(mutedStyle.Render(status))
-	default:
-		body.WriteString(stepStyle.Render(status))
+		style = jobCanceledStyle
 	}
+	body.WriteString(style.Render(status))
 	body.WriteString("  ")
 	body.WriteString(m.result.Name)
 	if m.result.Error != "" {
@@ -2022,28 +2108,37 @@ func (m model) resultView() string {
 		body.WriteByte('\n')
 		body.WriteString(errorStyle.Render("Log persistence: " + m.result.StorageError))
 	}
-	if m.showResultCommand() {
-		body.WriteByte('\n')
-		body.WriteString(mutedStyle.Render("$ " + m.result.Command))
-	}
 	body.WriteString(m.gap())
-	body.WriteString(m.resultViewport.View())
+	body.WriteString(lipgloss.JoinHorizontal(
+		lipgloss.Top,
+		m.resultViewport.View(),
+		scrollBar(
+			m.resultViewport.Height,
+			!m.resultViewport.AtTop() || !m.resultViewport.AtBottom(),
+			m.resultViewport.ScrollPercent(),
+		),
+	))
 	footer := fmt.Sprintf(
-		"esc back • c cancel • r rerun • d delete output • ↑/↓ scroll • pgup/pgdown page • home/end jump • %.0f%%",
+		"esc back • c cancel • r rerun • d delete job • ↑/↓ scroll • pgup/pgdown page • home/end jump • %.0f%%",
 		m.resultViewport.ScrollPercent()*100,
 	)
 	return m.renderWorkspacePanel(body.String(), screenResult, "f6 switch tab • "+footer)
 }
 
-func (m model) statusView() string {
-	if m.status == "" {
-		return ""
+func (m model) statusBar() string {
+	width := m.width
+	if width <= 0 {
+		width = 80
 	}
-	style := okStyle
+	message := ansi.Truncate(m.status, max(1, width-2), "…")
+	line := " " + message
+	line += strings.Repeat(" ", max(0, width-ansi.StringWidth(line)))
+	line = ansi.Truncate(line, width, "")
+	style := statusBarStyle
 	if m.statusError {
-		style = errorStyle
+		style = statusBarErrorStyle
 	}
-	return m.gap() + style.Render(m.status)
+	return style.Render(line)
 }
 
 func (m model) navigationFooter(footer string) string {

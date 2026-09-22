@@ -226,22 +226,6 @@ func (s *server) dispatch(message request) response {
 			return response{Error: fmt.Sprintf("job %q not found", message.JobID)}
 		}
 		return s.startJobLocked(record.TaskID, record.Name, record.Command, record.Policy)
-	case "delete_output":
-		record, ok := s.jobs[message.JobID]
-		if !ok {
-			return response{Error: fmt.Sprintf("job %q not found", message.JobID)}
-		}
-		if !record.Done() {
-			return response{Error: "cannot delete output for an active job"}
-		}
-		output, _ := record.output.Slice(0)
-		record.output.Set("")
-		if err := s.persistLocked(record); err != nil {
-			record.output.Set(output)
-			return response{Error: err.Error()}
-		}
-		job := s.snapshotLocked(record, 0, true)
-		return response{Job: &job}
 	case "remove":
 		record, ok := s.jobs[message.JobID]
 		if !ok {

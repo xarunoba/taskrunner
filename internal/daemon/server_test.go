@@ -52,10 +52,6 @@ func TestDaemonSchedulesPerTaskAndPersistsJobs(t *testing.T) {
 		t.Fatalf("parallel same-task job status = %q, want running", statuses[parallel.ID])
 	}
 
-	if _, err := client.DeleteOutput(first.ID); err == nil {
-		t.Fatal("DeleteOutput() accepted an active job")
-	}
-
 	waitForJobs(t, client, 4)
 	firstDone, err := client.Job(first.ID, 0)
 	if err != nil {
@@ -75,13 +71,6 @@ func TestDaemonSchedulesPerTaskAndPersistsJobs(t *testing.T) {
 	if !parallelDone.StartedAt.Before(firstDone.EndedAt) {
 		t.Fatalf("parallel same-task job started at %s after first ended at %s", parallelDone.StartedAt, firstDone.EndedAt)
 	}
-	deleted, err := client.DeleteOutput(first.ID)
-	if err != nil {
-		t.Fatalf("delete first job output: %v", err)
-	}
-	if deleted.Output != "" || deleted.OutputSize != 0 {
-		t.Fatalf("deleted output = %q size=%d, want empty", deleted.Output, deleted.OutputSize)
-	}
 	waitForServerExit(t, stopped)
 	restarted := startTestServer(t, workspace)
 	jobs, err = client.Jobs()
@@ -99,11 +88,7 @@ func TestDaemonSchedulesPerTaskAndPersistsJobs(t *testing.T) {
 		if err != nil {
 			t.Fatalf("get persisted job %q: %v", job.ID, err)
 		}
-		if job.ID == first.ID {
-			if current.Output != "" {
-				t.Fatalf("cleared persisted job %q output = %q, want empty", job.ID, current.Output)
-			}
-		} else if current.Output == "" {
+		if current.Output == "" {
 			t.Fatalf("persisted job %q has no output", job.ID)
 		}
 	}
