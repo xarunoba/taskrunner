@@ -12,7 +12,7 @@ func (m model) updateFieldForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch key.String() {
 		case "esc":
 			m.showScreen(screenTask)
-			m.taskFocus = 3
+			m.taskFocus = 1
 			return m, m.focusTaskControl()
 		case "ctrl+s", "enter":
 			return m.saveFieldForm()
@@ -154,7 +154,7 @@ func (m model) saveFieldForm() (tea.Model, tea.Cmd) {
 		m.fieldCursor = len(fields) - 1
 	}
 	m.showScreen(screenTask)
-	m.taskFocus = 3
+	m.taskFocus = 1
 	m.status = ""
 	return m, m.focusTaskControl()
 }

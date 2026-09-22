@@ -175,26 +175,26 @@ func (m model) clickTaskForm(line string, x int) (tea.Model, tea.Cmd) {
 		m.taskFocus = 0
 		m.taskNameInput.SetCursor(max(0, x-3))
 		return m, m.focusTaskControl()
-	case strings.HasPrefix(line, "Command") || containsValueLine(line, m.taskCommandInput.Value()):
+	case strings.HasPrefix(line, "Fields") || strings.Contains(line, "No fields."):
 		m.taskFocus = 1
 		return m, m.focusTaskControl()
-	case strings.HasPrefix(line, "Job policy"):
+	case strings.HasPrefix(line, "Command") || containsValueLine(line, m.taskCommandInput.Value()):
 		m.taskFocus = 2
+		return m, m.focusTaskControl()
+	case strings.HasPrefix(line, "Job policy"):
+		m.taskFocus = 3
 		m.moveJobPolicy(1)
 		return m, m.focusTaskControl()
 	case strings.Contains(line, "Sequential") || strings.Contains(line, "Parallel") || strings.Contains(line, "Cancel previous"):
 		if selected := optionAtX(line, x-3, jobPolicyLabels); selected >= 0 {
 			m.formJobPolicy = jobPolicies[selected]
-			m.taskFocus = 2
+			m.taskFocus = 3
 			return m, m.focusTaskControl()
 		}
-	case strings.HasPrefix(line, "Fields") || strings.Contains(line, "No fields."):
-		m.taskFocus = 3
-		return m, m.focusTaskControl()
 	}
 	for i, field := range m.formFields {
 		if strings.Contains(line, field.Label) {
-			m.taskFocus = 3
+			m.taskFocus = 1
 			m.fieldCursor = i
 			return m, m.focusTaskControl()
 		}

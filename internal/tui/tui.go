@@ -269,7 +269,7 @@ func (m model) gap() string {
 func (m model) acceptsTextInput() bool {
 	switch m.screen {
 	case screenTask:
-		return m.taskFocus == 0 || m.taskFocus == 1
+		return m.taskFocus == 0 || m.taskFocus == 2
 	case screenField:
 		return m.fieldFocus == 0 || m.fieldFocus == 1 || m.fieldFocus == 3
 	case screenRun:

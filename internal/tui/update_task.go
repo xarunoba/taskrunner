@@ -68,10 +68,10 @@ func (m model) updateTaskForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.taskFocus = (m.taskFocus + 3) % 4
 			return m, m.focusTaskControl()
 		case "up":
-			if m.taskFocus == 1 {
+			if m.taskFocus == 2 {
 				break
 			}
-			if m.taskFocus == 3 && m.fieldCursor > 0 {
+			if m.taskFocus == 1 && m.fieldCursor > 0 {
 				m.fieldCursor--
 				return m, nil
 			}
@@ -80,10 +80,10 @@ func (m model) updateTaskForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, m.focusTaskControl()
 			}
 		case "down":
-			if m.taskFocus == 1 {
+			if m.taskFocus == 2 {
 				break
 			}
-			if m.taskFocus == 3 {
+			if m.taskFocus == 1 {
 				if m.fieldCursor < len(m.formFields)-1 {
 					m.fieldCursor++
 				}
@@ -92,22 +92,24 @@ func (m model) updateTaskForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.taskFocus++
 			return m, m.focusTaskControl()
 		case "enter":
-			if m.taskFocus == 1 {
+			if m.taskFocus == 2 {
 				break
+			}
+			if m.taskFocus == 1 {
+				if len(m.formFields) == 0 {
+					m.openFieldForm(-1)
+				} else {
+					m.openFieldForm(m.fieldCursor)
+				}
+				return m, nil
 			}
 			if m.taskFocus < 3 {
 				m.taskFocus++
 				return m, m.focusTaskControl()
 			}
-			if len(m.formFields) == 0 {
-				m.openFieldForm(-1)
-			} else {
-				m.openFieldForm(m.fieldCursor)
-			}
-			return m, nil
 		}
 
-		if m.taskFocus == 2 {
+		if m.taskFocus == 3 {
 			switch key.String() {
 			case "left", "h":
 				m.moveJobPolicy(-1)
@@ -116,13 +118,13 @@ func (m model) updateTaskForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		}
-		if m.taskFocus == 3 {
+		if m.taskFocus == 1 {
 			switch key.String() {
 			case "k":
 				if m.fieldCursor > 0 {
 					m.fieldCursor--
 				} else {
-					m.taskFocus = 2
+					m.taskFocus = 0
 					return m, m.focusTaskControl()
 				}
 			case "j":
@@ -157,7 +159,7 @@ func (m model) updateTaskForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 
-	if m.taskFocus >= 2 {
+	if m.taskFocus == 1 || m.taskFocus == 3 {
 		return m, nil
 	}
 
@@ -216,7 +218,7 @@ func (m *model) focusTaskControl() tea.Cmd {
 	switch m.taskFocus {
 	case 0:
 		return m.taskNameInput.Focus()
-	case 1:
+	case 2:
 		return m.taskCommandInput.Focus()
 	default:
 		return nil

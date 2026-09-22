@@ -112,9 +112,31 @@ func (m model) taskFormContent() (string, int) {
 	write(m.taskNameInput.View())
 	write(m.gap())
 
-	write(taskStepTitle("Command template", m.taskFocus == 1))
+	write(taskStepTitle("Fields", m.taskFocus == 1))
 	write("\n")
-	if m.taskFocus == 1 {
+	if len(m.formFields) == 0 {
+		if m.taskFocus == 1 {
+			focusLine = line
+			write(selectedStyle.Render("› No fields. Press a or enter to add one."))
+		} else {
+			write(mutedStyle.Render("No fields. Press a or enter to add one."))
+		}
+	} else {
+		for i := range m.formFields {
+			if m.taskFocus == 1 && i == m.fieldCursor {
+				focusLine = line
+			}
+			write(m.taskFieldLine(i))
+			if i < len(m.formFields)-1 {
+				write("\n")
+			}
+		}
+	}
+	write(m.gap())
+
+	write(taskStepTitle("Command template", m.taskFocus == 2))
+	write("\n")
+	if m.taskFocus == 2 {
 		focusLine = line + m.taskCommandCursorLine()
 	}
 	write(m.taskCommandView())
@@ -122,34 +144,12 @@ func (m model) taskFormContent() (string, int) {
 	write(mutedStyle.Render("Use {{field_key}} where a runtime value belongs."))
 	write(m.gap())
 
-	if m.taskFocus == 2 {
+	if m.taskFocus == 3 {
 		focusLine = line
 	}
-	write(taskStepTitle("Job policy", m.taskFocus == 2))
+	write(taskStepTitle("Job policy", m.taskFocus == 3))
 	write("\n")
 	write(m.pickerRow(jobPolicyLabels, jobPolicyIndex(m.formJobPolicy)))
-	write(m.gap())
-
-	write(taskStepTitle("Fields", m.taskFocus == 3))
-	write("\n")
-	if len(m.formFields) == 0 {
-		if m.taskFocus == 3 {
-			focusLine = line
-			write(selectedStyle.Render("› No fields. Press a or enter to add one."))
-		} else {
-			write(mutedStyle.Render("No fields. Press a or enter to add one."))
-		}
-		return body.String(), focusLine
-	}
-	for i := range m.formFields {
-		if m.taskFocus == 3 && i == m.fieldCursor {
-			focusLine = line
-		}
-		write(m.taskFieldLine(i))
-		if i < len(m.formFields)-1 {
-			write("\n")
-		}
-	}
 	return body.String(), focusLine
 }
 

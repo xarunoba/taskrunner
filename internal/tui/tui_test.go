@@ -45,7 +45,7 @@ func TestViewsFitTerminal(t *testing.T) {
 			assertFillsTerminal(t, m.View(), size.width, size.height)
 
 			m.openTaskForm(task.Task{})
-			m.taskFocus = 3
+			m.taskFocus = 1
 			assertFillsTerminal(t, m.View(), size.width, size.height)
 			if view := ansi.Strip(m.View()); !strings.Contains(view, "› No fields") {
 				t.Fatalf("task form viewport hides focused fields:\n%s", view)
@@ -93,7 +93,7 @@ func TestTaskFormViewportFollowsFocusedControls(t *testing.T) {
 		t.Fatalf("scrollable task form has no position bar:\n%s", view)
 	}
 
-	m.taskFocus = 1
+	m.taskFocus = 2
 	m.focusTaskControl()
 	updated, _ := m.updateTaskForm(tea.KeyMsg{Type: tea.KeyCtrlEnd})
 	m = updated.(model)
@@ -105,7 +105,7 @@ func TestTaskFormViewportFollowsFocusedControls(t *testing.T) {
 		t.Fatalf("task form viewport changed the command:\n%q", got)
 	}
 
-	m.taskFocus = 3
+	m.taskFocus = 1
 	m.fieldCursor = len(fields) - 1
 	view = ansi.Strip(m.View())
 	if !strings.Contains(view, "4. Four") {
@@ -429,7 +429,7 @@ func TestQuestionMarkRemainsEditableAndF1OpensHelp(t *testing.T) {
 	m := newModel(task.NewStore(t.TempDir()), nil)
 	m.resize(80, 24)
 	m.openTaskForm(task.Task{})
-	m.taskFocus = 1
+	m.taskFocus = 2
 	m.focusTaskControl()
 
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'?'}})
@@ -635,37 +635,37 @@ func TestTaskFormArrowAndMouseNavigation(t *testing.T) {
 	updated, _ = m.updateTaskForm(tea.KeyMsg{Type: tea.KeyTab})
 	m = updated.(model)
 	if m.taskFocus != 2 {
-		t.Fatalf("tab from command focus = %d, want 2", m.taskFocus)
+		t.Fatalf("tab from fields focus = %d, want 2", m.taskFocus)
 	}
 
-	updated, _ = m.updateTaskForm(tea.KeyMsg{Type: tea.KeyDown})
+	updated, _ = m.updateTaskForm(tea.KeyMsg{Type: tea.KeyTab})
 	m = updated.(model)
 	if m.taskFocus != 3 {
-		t.Fatalf("down from job policy focus = %d, want 3", m.taskFocus)
+		t.Fatalf("tab from command focus = %d, want 3", m.taskFocus)
 	}
 
 	updated, _ = m.updateTaskForm(tea.KeyMsg{Type: tea.KeyUp})
 	m = updated.(model)
 	if m.taskFocus != 2 {
-		t.Fatalf("up from fields focus = %d, want 2", m.taskFocus)
+		t.Fatalf("up from job policy focus = %d, want 2", m.taskFocus)
 	}
 
 	updated, _ = m.updateMouse(mouseClickOn(t, m.View(), "Cancel previous"))
 	m = updated.(model)
-	if m.formJobPolicy != task.JobCancelPrevious || m.taskFocus != 2 {
+	if m.formJobPolicy != task.JobCancelPrevious || m.taskFocus != 3 {
 		t.Fatalf("job policy click produced policy=%q focus=%d", m.formJobPolicy, m.taskFocus)
 	}
 
 	updated, _ = m.updateMouse(mouseClickOn(t, m.View(), "Fields"))
 	m = updated.(model)
-	if m.taskFocus != 3 {
-		t.Fatalf("click fields focus = %d, want 3", m.taskFocus)
+	if m.taskFocus != 1 {
+		t.Fatalf("click fields focus = %d, want 1", m.taskFocus)
 	}
 
 	updated, _ = m.updateMouse(tea.MouseMsg(tea.MouseEvent{Button: tea.MouseButtonWheelUp}))
 	m = updated.(model)
-	if m.taskFocus != 2 {
-		t.Fatalf("wheel up from fields focus = %d, want 2", m.taskFocus)
+	if m.taskFocus != 0 {
+		t.Fatalf("wheel up from fields focus = %d, want 0", m.taskFocus)
 	}
 }
 
@@ -702,6 +702,8 @@ func TestTaskCommandEditorAcceptsAndSavesMultipleLines(t *testing.T) {
 
 	updated, _ := m.updateTaskForm(tea.KeyMsg{Type: tea.KeyDown})
 	m = updated.(model)
+	updated, _ = m.updateTaskForm(tea.KeyMsg{Type: tea.KeyTab})
+	m = updated.(model)
 	for _, msg := range []tea.KeyMsg{
 		{Type: tea.KeyRunes, Runes: []rune("printf first")},
 		{Type: tea.KeyEnter},
@@ -713,7 +715,7 @@ func TestTaskCommandEditorAcceptsAndSavesMultipleLines(t *testing.T) {
 	if got, want := m.taskCommandInput.Value(), "printf first\nprintf second"; got != want {
 		t.Fatalf("multiline command = %q, want %q", got, want)
 	}
-	if m.taskFocus != 1 {
+	if m.taskFocus != 2 {
 		t.Fatalf("focus after command newline = %d, want command editor", m.taskFocus)
 	}
 
@@ -742,7 +744,7 @@ func TestTaskFormF2SavesAndReordersFields(t *testing.T) {
 		{Key: "second", Label: "Second", Type: task.FieldText},
 	}
 	m.formJobPolicy = task.JobParallel
-	m.taskFocus = 3
+	m.taskFocus = 1
 	m.fieldCursor = 1
 
 	updated, _ := m.updateTaskForm(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'['}})
