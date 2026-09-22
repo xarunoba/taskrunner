@@ -28,8 +28,11 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 		return err
 	}
 	if options.mode == modeHelp {
-		_, err := fmt.Fprint(stdout, helpText)
+		_, err := fmt.Fprint(stdout, helpTextFor(options.helpTopic))
 		return err
+	}
+	if options.mode == modeCompletion {
+		return executeCompletionCLI(options.shell, stdout)
 	}
 
 	workspace, err := os.Getwd()
@@ -39,14 +42,29 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 
 	switch options.mode {
 	case modeJobs:
-		return executeJobsCLI(workspace, options.all, stdout)
-	case modeJobLogs, modeJobCancel, modeJobRerun, modeJobRemove:
-		return executeJobCLI(workspace, options.mode, options.job, stdout)
+		return executeJobsCLI(workspace, options, stdout)
+	case modeJobLogs, modeJobWait, modeJobInspect, modeJobCancel, modeJobRerun, modeJobRemove, modeJobPrune:
+		return executeJobCLI(workspace, options, stdin, stdout, stderr)
 	}
 	store := task.NewStore(workspace)
 	items, err := store.Load()
 	if err != nil {
 		return err
+	}
+
+	switch options.mode {
+	case modeTasks:
+		return executeTasksCLI(items, options.json, stdout)
+	case modeTaskShow:
+		item, err := findTask(items, options.task)
+		if err != nil {
+			return err
+		}
+		return executeTaskShowCLI(item, options.json, stdout)
+	case modeTaskValidate:
+		return executeTaskValidateCLI(items, options.task)
+	case modeTaskRemove:
+		return executeTaskRemoveCLI(store, items, options.task, options.force, stdin, stdout, stderr)
 	}
 
 	initial := newModel(store, items)
@@ -70,7 +88,7 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 		if err != nil {
 			return err
 		}
-		return executeTaskCLI(workspace, item, values, stdin, stdout, stderr)
+		return executeTaskCLI(workspace, item, values, options, stdout, stderr)
 	}
 
 	program := tea.NewProgram(

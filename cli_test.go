@@ -171,7 +171,7 @@ func TestExecuteTaskCLIUsesPreparedValues(t *testing.T) {
 	}
 
 	var output bytes.Buffer
-	if err := executeTaskCLI(workspace, item, values, strings.NewReader(""), &output, &output); err != nil {
+	if err := executeTaskCLI(workspace, item, values, cliOptions{}, &output, &output); err != nil {
 		t.Fatalf("executeTaskCLI() error = %v", err)
 	}
 	if got, want := output.String(), "hello world||false"; got != want {
@@ -206,7 +206,7 @@ func TestJobCLIListsActiveJobsAndManagesHistory(t *testing.T) {
 	}
 
 	var output bytes.Buffer
-	if err := executeJobsCLI(workspace, false, &output); err != nil {
+	if err := executeJobsCLI(workspace, cliOptions{}, &output); err != nil {
 		t.Fatalf("executeJobsCLI(active) error = %v", err)
 	}
 	if !strings.Contains(output.String(), shortJobID(active.ID)) {
@@ -217,7 +217,7 @@ func TestJobCLIListsActiveJobsAndManagesHistory(t *testing.T) {
 	}
 
 	output.Reset()
-	if err := executeJobsCLI(workspace, true, &output); err != nil {
+	if err := executeJobsCLI(workspace, cliOptions{all: true}, &output); err != nil {
 		t.Fatalf("executeJobsCLI(all) error = %v", err)
 	}
 	for _, job := range []daemon.Job{completed, active} {
@@ -227,19 +227,19 @@ func TestJobCLIListsActiveJobsAndManagesHistory(t *testing.T) {
 	}
 
 	output.Reset()
-	if err := executeJobCLI(workspace, modeJobLogs, shortJobID(completed.ID), &output); err != nil {
+	if err := executeJobCLI(workspace, cliOptions{mode: modeJobLogs, job: shortJobID(completed.ID)}, strings.NewReader(""), &output, &output); err != nil {
 		t.Fatalf("executeJobCLI(logs) error = %v", err)
 	}
 	if got, want := output.String(), "complete"; got != want {
 		t.Fatalf("job logs = %q, want %q", got, want)
 	}
-	if err := executeJobCLI(workspace, modeJobRemove, shortJobID(completed.ID), &output); err != nil {
+	if err := executeJobCLI(workspace, cliOptions{mode: modeJobRemove, job: shortJobID(completed.ID)}, strings.NewReader(""), &output, &output); err != nil {
 		t.Fatalf("executeJobCLI(rm) error = %v", err)
 	}
 	if _, err := client.Job(completed.ID, 0); err == nil {
 		t.Fatal("removed job remains available")
 	}
-	if err := executeJobCLI(workspace, modeJobCancel, shortJobID(active.ID), &output); err != nil {
+	if err := executeJobCLI(workspace, cliOptions{mode: modeJobCancel, job: shortJobID(active.ID)}, strings.NewReader(""), &output, &output); err != nil {
 		t.Fatalf("executeJobCLI(cancel) error = %v", err)
 	}
 	waitForCLIJob(t, client, active.ID)

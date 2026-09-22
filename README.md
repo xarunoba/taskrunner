@@ -131,12 +131,20 @@ Running logs update live. The log viewport uses all available panel height. Comp
 taskrunner
 taskrunner create
 taskrunner edit <task>
-taskrunner run <task> [--set <key>=<value>]...
-taskrunner jobs [--all]
-taskrunner job logs <job>
+taskrunner run <task> [--set <key>=<value>]... [--detach|--dry-run]
+taskrunner tasks [--json]
+taskrunner task show <task> [--json]
+taskrunner task validate [task]
+taskrunner task rm <task> [--force]
+taskrunner jobs [--all] [--status <status>] [--task <task>] [--limit <count>] [--json|--quiet]
+taskrunner job logs <job> [--follow] [--tail <lines>]
+taskrunner job wait <job>
+taskrunner job inspect <job> [--json]
 taskrunner job cancel <job>
 taskrunner job rerun <job>
 taskrunner job rm <job>
+taskrunner job prune [--status <status>] [--before <age>] [--force]
+taskrunner completion <bash|zsh|fish>
 ```
 
 Show command help:
@@ -144,6 +152,18 @@ Show command help:
 ```sh
 taskrunner --help
 ```
+
+Command categories and subcommands provide contextual help:
+
+```sh
+taskrunner task
+taskrunner job
+taskrunner jobs --help
+taskrunner job logs --help
+taskrunner help job prune
+```
+
+Category help lists its commands. Command help lists that command's options.
 
 Open the task editor directly:
 
@@ -154,13 +174,28 @@ taskrunner edit "Deploy"
 
 Saving or canceling a directly opened create or edit form returns to the shell instead of opening the main TUI.
 
-Run a task without opening the TUI:
+### Run tasks
+
+Run a task and stream its combined standard output and standard error:
 
 ```sh
 taskrunner run "Deploy" \
   --set environment=staging \
   --set version=1.4.0 \
   --set confirmed=true
+```
+
+Use `--detach` to print the new job ID and return immediately:
+
+```sh
+job_id=$(taskrunner run "Deploy" --detach --set environment=staging)
+taskrunner job wait "$job_id"
+```
+
+Use `--dry-run` to validate the values and print the safely rendered command without creating a job. `--quiet` removes the `Command:` label for scripts:
+
+```sh
+taskrunner run "Deploy" --dry-run --quiet --set environment=staging
 ```
 
 Task names match case-insensitively by display name, JSON filename, or filename without `.json`.
@@ -173,33 +208,50 @@ Direct runs require every required field:
 - Choice values must match a configured option.
 - Unknown field keys are rejected.
 
-CLI runs also use the workspace daemon. The command waits for its job and writes the combined standard output and standard error log directly to the terminal.
-
 Quote `key=value` when the value contains whitespace or shell characters:
 
 ```sh
 taskrunner run "Release" --set 'note=release candidate'
 ```
 
-Manage jobs without opening the TUI:
+### Manage tasks
+
+`taskrunner tasks` prints task names, files, field counts, policies, and command templates. `--json` emits a JSON array.
+
+`taskrunner task show` prints the persisted definition. Its default output is indented JSON; `--json` emits compact JSON. `taskrunner task validate` validates one task or every task and produces no output on success.
+
+`taskrunner task rm` removes only the task definition. It does not remove job history. Interactive removal requires confirmation; scripts must pass `--force`.
+
+### Manage jobs
+
+`taskrunner jobs` lists queued and running jobs, newest first. Options:
+
+- `--all` or `-a` includes completed jobs.
+- `--status` selects `queued`, `running`, `succeeded`, `failed`, or `canceled`.
+- `--task` matches a task display name or JSON filename.
+- `--limit` limits the number of matching jobs.
+- `--json` emits a JSON array.
+- `--quiet` prints one full job ID per line.
+
+Job arguments accept the full ID or a unique ID prefix or suffix. The short ID printed by the table is a supported suffix.
+
+`taskrunner job logs` prints combined standard output and standard error. `--tail` selects the final number of lines. `--follow` or `-f` follows new output and exits with the job result.
+
+`taskrunner job wait` waits without printing logs and exits with the job result. `taskrunner job inspect` prints the full ID, task, status, policy, command, timestamps, output size, and errors. Use `--json` for machine-readable output.
+
+`taskrunner job cancel` accepts queued or running jobs. `taskrunner job rerun` starts a new job with the original command and policy. `taskrunner job rm` removes a completed job and its output; active jobs must be canceled first.
+
+`taskrunner job prune` removes matching completed jobs. `--status` limits removal to one completed status. `--before` accepts durations such as `24h` or `7d`. Interactive pruning requires confirmation; scripts must pass `--force`.
+
+### Shell completion
+
+Generate completion source for Bash, Zsh, or Fish:
 
 ```sh
-# List queued and running jobs.
-taskrunner jobs
-
-# Include succeeded, failed, and canceled jobs.
-taskrunner jobs --all
-
-# Inspect or act on a job from either list.
-taskrunner job logs <job>
-taskrunner job cancel <job>
-taskrunner job rerun <job>
-taskrunner job rm <job>
+taskrunner completion bash
+taskrunner completion zsh
+taskrunner completion fish
 ```
-
-`job logs` prints the job's combined standard output and standard error. `job cancel` accepts queued or running jobs. `job rerun` starts a new job with the original command and job policy. `job rm` removes a completed job and its output; active jobs must be canceled first.
-
-Job arguments accept the full ID or a unique ID prefix or suffix. The short ID printed by `taskrunner jobs` is a supported suffix.
 
 ## Task files
 
