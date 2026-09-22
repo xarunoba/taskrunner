@@ -97,3 +97,18 @@ func (s *server) persistLocked(record *jobRecord) error {
 	}
 	return nil
 }
+
+func (s *server) removeLocked(record *jobRecord) error {
+	path := filepath.Join(s.workspace, ".taskrunner", jobHistoryDirectory, record.ID+".json")
+	if err := os.Remove(path); err != nil {
+		return fmt.Errorf("remove job: %w", err)
+	}
+	delete(s.jobs, record.ID)
+	for i, id := range s.order {
+		if id == record.ID {
+			s.order = append(s.order[:i], s.order[i+1:]...)
+			break
+		}
+	}
+	return nil
+}

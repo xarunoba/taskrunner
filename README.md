@@ -132,6 +132,11 @@ taskrunner
 taskrunner create
 taskrunner edit <task>
 taskrunner run <task> [--set <key>=<value>]...
+taskrunner jobs [--all]
+taskrunner job logs <job>
+taskrunner job cancel <job>
+taskrunner job rerun <job>
+taskrunner job rm <job>
 ```
 
 Show command help:
@@ -146,6 +151,8 @@ Open the task editor directly:
 taskrunner create
 taskrunner edit "Deploy"
 ```
+
+Saving or canceling a directly opened create or edit form returns to the shell instead of opening the main TUI.
 
 Run a task without opening the TUI:
 
@@ -173,6 +180,26 @@ Quote `key=value` when the value contains whitespace or shell characters:
 ```sh
 taskrunner run "Release" --set 'note=release candidate'
 ```
+
+Manage jobs without opening the TUI:
+
+```sh
+# List queued and running jobs.
+taskrunner jobs
+
+# Include succeeded, failed, and canceled jobs.
+taskrunner jobs --all
+
+# Inspect or act on a job from either list.
+taskrunner job logs <job>
+taskrunner job cancel <job>
+taskrunner job rerun <job>
+taskrunner job rm <job>
+```
+
+`job logs` prints the job's combined standard output and standard error. `job cancel` accepts queued or running jobs. `job rerun` starts a new job with the original command and job policy. `job rm` removes a completed job and its output; active jobs must be canceled first.
+
+Job arguments accept the full ID or a unique ID prefix or suffix. The short ID printed by `taskrunner jobs` is a supported suffix.
 
 ## Task files
 

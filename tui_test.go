@@ -87,7 +87,7 @@ func TestTaskLogOpensAtBottomAndOutputClickDoesNotClose(t *testing.T) {
 	if !m.resultViewport.AtBottom() {
 		t.Fatal("result viewport did not open at the bottom")
 	}
-	if got, want := m.resultViewport.Height, m.contentHeight()-3; got != want {
+	if got, want := m.resultViewport.Height, m.contentHeight()-2; got != want {
 		t.Fatalf("compact log viewport height = %d, want maximum %d", got, want)
 	}
 	assertFillsTerminal(t, m.View(), 40, 10)
@@ -132,6 +132,71 @@ func TestFailedTaskLogShowsFailureSummary(t *testing.T) {
 	}
 	if !strings.Contains(view, "failure details") {
 		t.Fatalf("result view does not contain command output:\n%s", view)
+	}
+}
+
+func TestWorkspaceHeaderUsesTopBorder(t *testing.T) {
+	t.Parallel()
+
+	workspace := t.TempDir()
+	m := newModel(task.NewStore(workspace), nil)
+	m.resize(80, 24)
+
+	m.setStatus("Saved")
+	styledView := m.View()
+	styledHeader := strings.Split(styledView, "\n")[0]
+	if !strings.Contains(styledHeader, activeTabStyle.Render("Tasks")) ||
+		!strings.Contains(styledHeader, inactiveTabStyle.Render("Jobs")) {
+		t.Fatalf("top border does not render active and inactive tab backgrounds:\n%s", styledHeader)
+	}
+
+	view := ansi.Strip(styledView)
+	lines := strings.Split(view, "\n")
+	header := lines[0]
+	tasks := strings.Index(header, "Tasks")
+	jobs := strings.Index(header, "Jobs")
+	path := strings.Index(header, workspace)
+	if tasks < 0 || jobs <= tasks || path <= jobs {
+		t.Fatalf("top border does not contain ordered tabs and workspace:\n%s", header)
+	}
+	footer := lines[len(lines)-1]
+	if !strings.HasPrefix(footer, "╰─ ") || !strings.Contains(footer, "tab switch") {
+		t.Fatalf("bottom border does not contain navigation controls:\n%s", footer)
+	}
+	if status := strings.Index(view, "Saved"); status < 0 || status >= strings.LastIndex(view, footer) {
+		t.Fatalf("status does not render above bottom-border controls:\n%s", view)
+	}
+	if strings.Contains(view, "TASKRUNNER") {
+		t.Fatalf("view still contains the taskrunner title:\n%s", view)
+	}
+}
+
+func TestTabsRestoreScreenAndValues(t *testing.T) {
+	t.Parallel()
+
+	m := newModel(task.NewStore(t.TempDir()), nil)
+	m.resize(80, 24)
+	m.openTaskForm(task.Task{})
+	m.taskInputs[0].SetValue("draft task")
+
+	updated, _ := m.updateMouse(mouseClickOn(t, m.View(), "Jobs"))
+	m = updated.(model)
+	if m.screen != screenJobs {
+		t.Fatalf("screen after switching to Jobs = %d, want jobs", m.screen)
+	}
+
+	job := daemon.Job{ID: "job-preserved", Name: "Preserved", Status: daemon.StatusRunning, Output: "output"}
+	m.openResult(job)
+	updated, _ = m.updateMouse(mouseClickOn(t, m.View(), "Tasks"))
+	m = updated.(model)
+	if m.screen != screenTask || m.taskInputs[0].Value() != "draft task" {
+		t.Fatalf("restored task state = screen %d, value %q", m.screen, m.taskInputs[0].Value())
+	}
+
+	updated, _ = m.updateMouse(mouseClickOn(t, m.View(), "Jobs"))
+	m = updated.(model)
+	if m.screen != screenResult || m.result.ID != job.ID {
+		t.Fatalf("restored job state = screen %d, job %q", m.screen, m.result.ID)
 	}
 }
 
@@ -545,6 +610,48 @@ func TestRequiredTextFieldStillRejectsEmptyValue(t *testing.T) {
 	m = updated.(model)
 	if m.runIndex != 0 || !m.statusError {
 		t.Fatalf("required empty input produced index=%d error=%t", m.runIndex, m.statusError)
+	}
+}
+
+func TestStandaloneTaskFormQuitsAfterCancelAndSave(t *testing.T) {
+	t.Parallel()
+
+	store := task.NewStore(t.TempDir())
+	m := newModel(store, nil)
+	m.standaloneForm = true
+	m.openTaskForm(task.Task{})
+
+	updated, cmd := m.updateTaskForm(tea.KeyMsg{Type: tea.KeyEsc})
+	m = updated.(model)
+	if cmd == nil {
+		t.Fatal("standalone cancel returned no command")
+	}
+	if _, ok := cmd().(tea.QuitMsg); !ok {
+		t.Fatal("standalone cancel did not quit")
+	}
+	if m.screen != screenTask {
+		t.Fatalf("standalone cancel screen = %d, want task form", m.screen)
+	}
+
+	m.taskInputs[0].SetValue("Saved task")
+	m.taskInputs[1].SetValue("printf saved")
+	updated, cmd = m.saveTaskForm()
+	m = updated.(model)
+	if cmd == nil {
+		t.Fatal("standalone save returned no command")
+	}
+	if _, ok := cmd().(tea.QuitMsg); !ok {
+		t.Fatal("standalone save did not quit")
+	}
+	if m.screen != screenTask {
+		t.Fatalf("standalone save screen = %d, want task form", m.screen)
+	}
+	tasks, err := store.Load()
+	if err != nil {
+		t.Fatalf("load saved task: %v", err)
+	}
+	if len(tasks) != 1 || tasks[0].Name != "Saved task" {
+		t.Fatalf("saved tasks = %#v, want Saved task", tasks)
 	}
 }
 

@@ -29,14 +29,18 @@ const (
 )
 
 var (
-	accentStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("63")).Bold(true)
-	mutedStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
-	cursorStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("212")).Bold(true)
-	selectedStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("230")).Background(lipgloss.Color("57")).Bold(true).Padding(0, 1)
-	stepStyle     = selectedStyle
-	errorStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("196"))
-	okStyle       = lipgloss.NewStyle().Foreground(lipgloss.Color("42"))
-	panelStyle    = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("63")).Padding(1, 2)
+	accentColor      = lipgloss.Color("63")
+	accentStyle      = lipgloss.NewStyle().Foreground(accentColor).Bold(true)
+	borderStyle      = lipgloss.NewStyle().Foreground(accentColor)
+	mutedStyle       = lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
+	cursorStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("212")).Bold(true)
+	selectedStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("230")).Background(lipgloss.Color("57")).Bold(true).Padding(0, 1)
+	activeTabStyle   = selectedStyle
+	inactiveTabStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("250")).Background(lipgloss.Color("236")).Padding(0, 1)
+	stepStyle        = selectedStyle
+	errorStyle       = lipgloss.NewStyle().Foreground(lipgloss.Color("196"))
+	okStyle          = lipgloss.NewStyle().Foreground(lipgloss.Color("42"))
+	panelStyle       = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(accentColor).Padding(1, 2)
 )
 
 var fieldTypes = []task.FieldType{
@@ -92,17 +96,20 @@ type model struct {
 	cursor      int
 	jobCursor   int
 	screen      screen
+	taskScreen  screen
+	jobScreen   screen
 	status      string
 	statusError bool
 	width       int
 	height      int
 
-	taskInputs    [2]textinput.Model
-	taskFocus     int
-	formFields    []task.Field
-	formJobPolicy task.JobPolicy
-	fieldCursor   int
-	editingFile   string
+	taskInputs     [2]textinput.Model
+	taskFocus      int
+	formFields     []task.Field
+	formJobPolicy  task.JobPolicy
+	fieldCursor    int
+	editingFile    string
+	standaloneForm bool
 
 	fieldInputs     [3]textinput.Model
 	fieldFocus      int
@@ -142,6 +149,7 @@ func newModel(store *task.Store, tasks []task.Task) model {
 		queued:         make(map[string]int),
 		latest:         make(map[string]daemon.Status),
 		trackedJobs:    make(map[string]struct{}),
+		jobScreen:      screenJobs,
 		taskInputs:     [2]textinput.Model{name, command},
 		fieldInputs:    [3]textinput.Model{key, label, options},
 		editingField:   -1,
@@ -196,7 +204,7 @@ func (m model) filePickerHeight() int {
 func (m *model) resizeResultViewport() {
 	atBottom := m.resultViewport.AtBottom()
 	m.resultViewport.Width = m.contentWidth()
-	chromeHeight := 3 // Title, status, and footer.
+	chromeHeight := 2 // Title and status.
 	if m.result.StorageError != "" {
 		chromeHeight++
 	}
@@ -204,7 +212,7 @@ func (m *model) resizeResultViewport() {
 		chromeHeight++
 	}
 	if m.gap() == "\n\n" {
-		chromeHeight += 2
+		chromeHeight++
 	}
 	m.resultViewport.Height = max(1, m.contentHeight()-chromeHeight)
 	if atBottom {
@@ -297,8 +305,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.MouseMsg:
 		return m.updateMouse(msg)
 	case tea.KeyMsg:
-		if msg.String() == "ctrl+c" {
+		switch msg.String() {
+		case "ctrl+c":
 			return m, tea.Quit
+		case "f6":
+			m.switchTab(otherTopLevelTab(m.screen))
+			return m, nil
 		}
 	}
 
@@ -349,11 +361,9 @@ func (m model) updateMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	if event.Action != tea.MouseActionPress || event.Button != tea.MouseButtonLeft {
 		return m, nil
 	}
-	if m.screen == screenList || m.screen == screenJobs {
-		if screen, ok := m.topLevelTabAt(event.Y, event.X); ok {
-			m.screen = screen
-			return m, nil
-		}
+	if screen, ok := m.topLevelTabAt(event.Y, event.X); ok {
+		m.switchTab(screen)
+		return m, nil
 	}
 
 	line := m.mouseLine(event.Y)
@@ -395,6 +405,10 @@ func (m model) mouseLine(y int) string {
 	line := strings.TrimSpace(lines[y])
 	line = strings.TrimPrefix(line, "│")
 	line = strings.TrimSuffix(line, "│")
+	line = strings.TrimPrefix(line, "╰─ ")
+	if border := strings.LastIndex(line, " ─"); border >= 0 {
+		line = line[:border]
+	}
 	return strings.TrimSpace(line)
 }
 
@@ -601,8 +615,7 @@ func (m model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "q":
 		return m, tea.Quit
 	case "tab", "shift+tab":
-		m.screen = screenJobs
-		m.jobCursor = 0
+		m.switchTab(screenJobs)
 	case "up", "k":
 		if m.cursor > 0 {
 			m.cursor--
@@ -644,6 +657,9 @@ func (m model) updateTaskForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if key, ok := msg.(tea.KeyMsg); ok {
 		switch key.String() {
 		case "esc":
+			if m.standaloneForm {
+				return m, tea.Quit
+			}
 			m.closeTaskForm()
 			return m, nil
 		case "ctrl+s", "f2":
@@ -811,6 +827,10 @@ func (m model) saveTaskForm() (tea.Model, tea.Cmd) {
 		m.setError(err)
 		return m, nil
 	}
+	m.setStatus(fmt.Sprintf("Saved %s", saved.Name))
+	if m.standaloneForm {
+		return m, tea.Quit
+	}
 	m.closeTaskForm()
 	for i := range m.tasks {
 		if m.tasks[i].File == saved.File {
@@ -818,7 +838,6 @@ func (m model) saveTaskForm() (tea.Model, tea.Cmd) {
 			break
 		}
 	}
-	m.setStatus(fmt.Sprintf("Saved %s", saved.Name))
 	return m, nil
 }
 
@@ -1406,7 +1425,7 @@ func (m model) updateJobs(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case "q":
 		return m, tea.Quit
 	case "tab", "shift+tab":
-		m.screen = screenList
+		m.switchTab(screenList)
 	case "up", "k":
 		if m.jobCursor > 0 {
 			m.jobCursor--
@@ -1490,33 +1509,80 @@ func (m model) View() string {
 	}
 }
 
-func (m model) workspaceHeader(active screen) string {
-	var body strings.Builder
-	body.WriteString(accentStyle.Render("TASKRUNNER"))
-	body.WriteByte('\n')
-	body.WriteString(mutedStyle.Render(m.store.Workspace()))
-	body.WriteString(m.gap())
-	if active == screenList {
-		body.WriteString(selectedStyle.Render("Tasks"))
-		body.WriteString("  ")
-		body.WriteString(mutedStyle.Render("Jobs"))
-	} else {
-		body.WriteString(mutedStyle.Render("Tasks"))
-		body.WriteString("  ")
-		body.WriteString(selectedStyle.Render("Jobs"))
+func topLevelTab(current screen) screen {
+	switch current {
+	case screenJobs, screenResult:
+		return screenJobs
+	default:
+		return screenList
 	}
-	return body.String()
+}
+
+func otherTopLevelTab(current screen) screen {
+	if topLevelTab(current) == screenList {
+		return screenJobs
+	}
+	return screenList
+}
+
+func (m *model) switchTab(target screen) {
+	currentTab := topLevelTab(m.screen)
+	targetTab := topLevelTab(target)
+	if currentTab == targetTab {
+		return
+	}
+
+	if currentTab == screenList {
+		m.taskScreen = m.screen
+	} else {
+		m.jobScreen = m.screen
+	}
+	if targetTab == screenList {
+		m.screen = m.taskScreen
+	} else {
+		m.screen = m.jobScreen
+	}
+}
+
+func (m model) workspaceHeader(active screen) string {
+	tasksStyle := inactiveTabStyle
+	jobsStyle := inactiveTabStyle
+	if topLevelTab(active) == screenList {
+		tasksStyle = activeTabStyle
+	} else {
+		jobsStyle = activeTabStyle
+	}
+
+	tabs := tasksStyle.Render("Tasks") + " " + jobsStyle.Render("Jobs")
+	width := m.contentWidth() + panelStyle.GetHorizontalFrameSize()
+	titleWidth := max(0, width-5)
+	title := ansi.Truncate(tabs, titleWidth, "")
+	if pathWidth := titleWidth - ansi.StringWidth(tabs) - 2; pathWidth > 0 {
+		path := ansi.Truncate(m.store.Workspace(), pathWidth, "…")
+		title += "  " + mutedStyle.Render(path)
+	}
+	fillWidth := max(0, width-ansi.StringWidth(title)-5)
+	return borderStyle.Render("╭─ ") +
+		title +
+		borderStyle.Render(" "+strings.Repeat("─", fillWidth)+"╮")
+}
+
+func (m model) renderWorkspacePanel(content string, active screen, footer string) string {
+	panel := m.renderPanelWithFooter(content, footer)
+	_, rest, ok := strings.Cut(panel, "\n")
+	if !ok {
+		return m.workspaceHeader(active)
+	}
+	return m.workspaceHeader(active) + "\n" + rest
 }
 
 func (m model) listView() string {
 	var body strings.Builder
-	body.WriteString(m.workspaceHeader(screenList))
-	body.WriteString(m.gap())
 
 	if len(m.tasks) == 0 {
 		body.WriteString(mutedStyle.Render("No tasks yet. Press n to create one."))
 	} else {
-		start, end := visibleRange(len(m.tasks), m.cursor, max(1, m.contentHeight()-12))
+		start, end := visibleRange(len(m.tasks), m.cursor, max(1, m.contentHeight()-7))
 		if start > 0 {
 			body.WriteString(mutedStyle.Render(fmt.Sprintf("↑ %d more", start)))
 			body.WriteByte('\n')
@@ -1548,10 +1614,12 @@ func (m model) listView() string {
 		}
 	}
 
-	body.WriteString(m.gap())
-	body.WriteString(mutedStyle.Render("tab switch • enter run • n new • e edit • d delete • q quit"))
 	body.WriteString(m.statusView())
-	return m.renderPanel(body.String())
+	return m.renderWorkspacePanel(
+		body.String(),
+		screenList,
+		"tab switch • enter run • n new • e edit • d delete • q quit",
+	)
 }
 
 func jobPolicySummary(policy task.JobPolicy) string {
@@ -1588,12 +1656,10 @@ func (m model) taskActivity(taskID string) string {
 
 func (m model) jobsView() string {
 	var body strings.Builder
-	body.WriteString(m.workspaceHeader(screenJobs))
-	body.WriteString(m.gap())
 	if len(m.jobs) == 0 {
 		body.WriteString(mutedStyle.Render("No jobs yet."))
 	} else {
-		start, end := visibleRange(len(m.jobs), m.jobCursor, max(1, m.contentHeight()-10))
+		start, end := visibleRange(len(m.jobs), m.jobCursor, max(1, m.contentHeight()-4))
 		for i := start; i < end; i++ {
 			job := m.jobs[len(m.jobs)-1-i]
 			line := fmt.Sprintf("%-9s %s  %s", strings.ToUpper(string(job.Status)), job.Name, shortJobID(job.ID))
@@ -1616,10 +1682,12 @@ func (m model) jobsView() string {
 			}
 		}
 	}
-	body.WriteString(m.gap())
-	body.WriteString(mutedStyle.Render("tab switch • enter log • c cancel • r rerun • d delete output • q quit"))
 	body.WriteString(m.statusView())
-	return m.renderPanel(body.String())
+	return m.renderWorkspacePanel(
+		body.String(),
+		screenJobs,
+		"tab switch • enter log • c cancel • r rerun • d delete output • q quit",
+	)
 }
 
 func shortJobID(id string) string {
@@ -1706,10 +1774,12 @@ func (m model) taskFormView() string {
 			body.WriteByte('\n')
 		}
 	}
-	body.WriteString(m.gap())
-	body.WriteString(mutedStyle.Render("tab section • ←/→ policy • [/] reorder • a add • e edit • d delete • f2 save • esc cancel"))
 	body.WriteString(m.statusView())
-	return m.renderPanel(body.String())
+	return m.renderWorkspacePanel(
+		body.String(),
+		screenTask,
+		"f6 switch tab • tab section • ←/→ policy • [/] reorder • a add • e edit • d delete • f2 save • esc cancel",
+	)
 }
 
 func (m model) compactTaskFormView(title string) string {
@@ -1757,10 +1827,12 @@ func (m model) compactTaskFormView(title string) string {
 		)))
 	}
 
-	body.WriteString(m.gap())
-	body.WriteString(mutedStyle.Render("tab section • ←/→ policy • [/] reorder • f2 save • esc cancel"))
 	body.WriteString(m.statusView())
-	return m.renderPanel(body.String())
+	return m.renderWorkspacePanel(
+		body.String(),
+		screenTask,
+		"f6 switch tab • tab section • ←/→ policy • [/] reorder • f2 save • esc cancel",
+	)
 }
 
 func taskStepTitle(title string, active bool) string {
@@ -1849,14 +1921,17 @@ func (m model) fieldFormView() string {
 		requirement = 1
 	}
 	body.WriteString(m.pickerRow([]string{"Required", "Optional"}, requirement))
-	body.WriteString(m.gap())
-	body.WriteString(mutedStyle.Render("↑/↓ step • ←/→ change • space toggle • enter save • esc cancel"))
 	body.WriteString(m.statusView())
-	return m.renderPanel(body.String())
+	return m.renderWorkspacePanel(
+		body.String(),
+		screenField,
+		"f6 switch tab • ↑/↓ step • ←/→ change • space toggle • enter save • esc cancel",
+	)
 }
 
 func (m model) runFormView() string {
 	field := m.runTask.Fields[m.runIndex]
+	var help string
 	var body strings.Builder
 	body.WriteString(accentStyle.Render(m.runTask.Name))
 	body.WriteString("\n")
@@ -1876,12 +1951,10 @@ func (m model) runFormView() string {
 	switch field.Type {
 	case task.FieldText:
 		body.WriteString(m.runInput.View())
-		body.WriteString(m.gap())
-		help := "enter continue • ↑/↓ history • shift+tab back • esc cancel"
+		help = "enter continue • ↑/↓ history • shift+tab back • esc cancel"
 		if field.Optional {
 			help = "enter skip/continue • ↑/↓ history • shift+tab back • esc cancel"
 		}
-		body.WriteString(mutedStyle.Render(help))
 	case task.FieldChoice:
 		if field.Optional {
 			skip := "  Skip"
@@ -1909,31 +1982,26 @@ func (m model) runFormView() string {
 			body.WriteString(mutedStyle.Render(fmt.Sprintf("↓ %d more", len(field.Options)-end)))
 			body.WriteByte('\n')
 		}
-		body.WriteString(m.gap())
-		body.WriteString(mutedStyle.Render("↑/↓ choose • shift+tab back • enter continue • esc cancel"))
+		help = "↑/↓ choose • shift+tab back • enter continue • esc cancel"
 	case task.FieldFile:
 		body.WriteString(m.filePicker.View())
-		body.WriteString(m.gap())
-		help := "↑/↓ browse • shift+tab back • enter open/select • esc cancel"
+		help = "↑/↓ browse • shift+tab back • enter open/select • esc cancel"
 		if field.Optional {
 			help = "↑/↓ browse • s/click skip • enter select • shift+tab back • esc cancel"
 		}
-		body.WriteString(mutedStyle.Render(help))
 	case task.FieldConfirm:
 		selected := 0
 		if m.confirmationYes {
 			selected = 1
 		}
 		body.WriteString(m.pickerRow([]string{"No", "Yes"}, selected))
-		body.WriteString(m.gap())
-		help := "←/→ choose • shift+tab back • enter confirm • esc cancel"
+		help = "←/→ choose • shift+tab back • enter confirm • esc cancel"
 		if field.Optional {
 			help = "←/→ choose • enter continue • shift+tab back • esc cancel"
 		}
-		body.WriteString(mutedStyle.Render(help))
 	}
 	body.WriteString(m.statusView())
-	return m.renderPanel(body.String())
+	return m.renderWorkspacePanel(body.String(), screenRun, "f6 switch tab • "+help)
 }
 
 func (m model) resultView() string {
@@ -1967,12 +2035,11 @@ func (m model) resultView() string {
 	}
 	body.WriteString(m.gap())
 	body.WriteString(m.resultViewport.View())
-	body.WriteString(m.gap())
-	body.WriteString(mutedStyle.Render(fmt.Sprintf(
+	footer := fmt.Sprintf(
 		"esc back • c cancel • r rerun • d delete output • ↑/↓ scroll • pgup/pgdown page • home/end jump • %.0f%%",
 		m.resultViewport.ScrollPercent()*100,
-	)))
-	return m.renderPanel(body.String())
+	)
+	return m.renderWorkspacePanel(body.String(), screenResult, "f6 switch tab • "+footer)
 }
 
 func (m model) statusView() string {
@@ -1984,6 +2051,22 @@ func (m model) statusView() string {
 		style = errorStyle
 	}
 	return m.gap() + style.Render(m.status)
+}
+
+func (m model) navigationFooter(footer string) string {
+	width := m.contentWidth() + panelStyle.GetHorizontalFrameSize()
+	titleWidth := max(0, width-5)
+	title := mutedStyle.Render(ansi.Truncate(footer, titleWidth, "…"))
+	fillWidth := max(0, width-ansi.StringWidth(title)-5)
+	return borderStyle.Render("╰─ ") +
+		title +
+		borderStyle.Render(" "+strings.Repeat("─", fillWidth)+"╯")
+}
+
+func (m model) renderPanelWithFooter(content, footer string) string {
+	lines := strings.Split(m.renderPanel(content), "\n")
+	lines[len(lines)-1] = m.navigationFooter(footer)
+	return strings.Join(lines, "\n")
 }
 
 func (m model) renderPanel(content string) string {

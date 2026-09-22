@@ -36,6 +36,13 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 	if err != nil {
 		return fmt.Errorf("get workspace: %w", err)
 	}
+
+	switch options.mode {
+	case modeJobs:
+		return executeJobsCLI(workspace, options.all, stdout)
+	case modeJobLogs, modeJobCancel, modeJobRerun, modeJobRemove:
+		return executeJobCLI(workspace, options.mode, options.job, stdout)
+	}
 	store := task.NewStore(workspace)
 	items, err := store.Load()
 	if err != nil {
@@ -45,12 +52,14 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 	initial := newModel(store, items)
 	switch options.mode {
 	case modeCreate:
+		initial.standaloneForm = true
 		initial.openTaskForm(task.Task{})
 	case modeEdit:
 		item, err := findTask(items, options.task)
 		if err != nil {
 			return err
 		}
+		initial.standaloneForm = true
 		initial.openTaskForm(item)
 	case modeRun:
 		item, err := findTask(items, options.task)

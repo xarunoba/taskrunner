@@ -176,6 +176,41 @@ func TestCancelAndRerunCreateNewJob(t *testing.T) {
 	waitForServerExit(t, stopped)
 }
 
+func TestRemoveDeletesCompletedJobHistory(t *testing.T) {
+	workspace := t.TempDir()
+	stopped := startTestServer(t, workspace)
+	client := NewClient(workspace)
+
+	job, err := client.Start("build.json", "Build", "sleep 5", task.JobSequential)
+	if err != nil {
+		t.Fatalf("start job: %v", err)
+	}
+	if _, err := client.Remove(job.ID); err == nil {
+		t.Fatal("Remove() accepted an active job")
+	}
+	if _, err := client.Cancel(job.ID); err != nil {
+		t.Fatalf("cancel job: %v", err)
+	}
+	waitForJobStatus(t, client, job.ID, StatusCanceled)
+	if _, err := client.Remove(job.ID); err != nil {
+		t.Fatalf("remove completed job: %v", err)
+	}
+	if _, err := client.Job(job.ID, 0); err == nil {
+		t.Fatal("removed job remains available")
+	}
+	waitForServerExit(t, stopped)
+
+	restarted := startTestServer(t, workspace)
+	jobs, err := client.Jobs()
+	if err != nil {
+		t.Fatalf("list jobs after restart: %v", err)
+	}
+	if len(jobs) != 0 {
+		t.Fatalf("jobs after restart = %d, want 0", len(jobs))
+	}
+	waitForServerExit(t, restarted)
+}
+
 func waitForJobStatus(t *testing.T, client *Client, id string, want Status) {
 	t.Helper()
 	deadline := time.Now().Add(3 * time.Second)

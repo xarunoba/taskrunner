@@ -242,6 +242,19 @@ func (s *server) dispatch(message request) response {
 		}
 		job := s.snapshotLocked(record, 0, true)
 		return response{Job: &job}
+	case "remove":
+		record, ok := s.jobs[message.JobID]
+		if !ok {
+			return response{Error: fmt.Sprintf("job %q not found", message.JobID)}
+		}
+		if !record.Done() {
+			return response{Error: "cannot remove an active job"}
+		}
+		if err := s.removeLocked(record); err != nil {
+			return response{Error: err.Error()}
+		}
+		job := s.snapshotLocked(record, 0, false)
+		return response{Job: &job}
 	default:
 		return response{Error: fmt.Sprintf("unknown daemon action %q", message.Action)}
 	}

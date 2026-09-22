@@ -80,6 +80,10 @@ func (c *Client) Rerun(id string) (Job, error) {
 	return c.jobAction("rerun", id)
 }
 
+func (c *Client) Remove(id string) (Job, error) {
+	return c.jobAction("remove", id)
+}
+
 func (c *Client) jobAction(action, id string) (Job, error) {
 	result, err := c.do(request{Action: action, JobID: id})
 	if err != nil {
