@@ -7,9 +7,11 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"text/tabwriter"
 
+	"github.com/spf13/cobra"
 	"github.com/xarunoba/taskrunner/internal/task"
 )
 
@@ -153,4 +155,126 @@ func confirmDestructive(stdin io.Reader, stderr io.Writer, prompt string, force 
 	}
 	answer = strings.ToLower(strings.TrimSpace(answer))
 	return answer == "y" || answer == "yes", nil
+}
+
+func (a *cliApp) newCreateCommand() *cobra.Command {
+	return &cobra.Command{
+		Use:   "create",
+		Short: "Open the task creation form",
+		Args:  cobra.NoArgs,
+		RunE: func(_ *cobra.Command, _ []string) error {
+			return a.runTUI("", true)
+		},
+	}
+}
+
+func (a *cliApp) newEditCommand() *cobra.Command {
+	return &cobra.Command{
+		Use:   "edit <task>",
+		Short: "Open a task in the editor",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(_ *cobra.Command, args []string) error {
+			return a.runTUI(args[0], false)
+		},
+	}
+}
+
+func (a *cliApp) newTasksCommand() *cobra.Command {
+	var jsonOutput bool
+	cmd := &cobra.Command{
+		Use:   "tasks",
+		Short: "List task definitions",
+		Args:  cobra.NoArgs,
+		RunE: func(_ *cobra.Command, _ []string) error {
+			_, _, items, err := loadTaskStore()
+			if err != nil {
+				return err
+			}
+			return executeTasksCLI(items, jsonOutput, a.stdout)
+		},
+	}
+	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Emit a JSON array")
+	return cmd
+}
+
+func (a *cliApp) newTaskCommand() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "task",
+		Short: "Manage task definitions",
+	}
+	cmd.AddCommand(
+		a.newTaskShowCommand(),
+		a.newTaskValidateCommand(),
+		a.newTaskRemoveCommand(),
+	)
+	return cmd
+}
+
+func (a *cliApp) newTaskShowCommand() *cobra.Command {
+	var jsonOutput bool
+	cmd := &cobra.Command{
+		Use:   "show <task>",
+		Short: "Print a task definition",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(_ *cobra.Command, args []string) error {
+			_, _, items, err := loadTaskStore()
+			if err != nil {
+				return err
+			}
+			item, err := findTask(items, args[0])
+			if err != nil {
+				return err
+			}
+			return executeTaskShowCLI(item, jsonOutput, a.stdout)
+		},
+	}
+	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Emit compact JSON")
+	return cmd
+}
+
+func (a *cliApp) newTaskValidateCommand() *cobra.Command {
+	return &cobra.Command{
+		Use:   "validate [task]",
+		Short: "Validate one task or every task",
+		Args:  cobra.MaximumNArgs(1),
+		RunE: func(_ *cobra.Command, args []string) error {
+			_, _, items, err := loadTaskStore()
+			if err != nil {
+				return err
+			}
+			var name string
+			if len(args) == 1 {
+				name = args[0]
+			}
+			return executeTaskValidateCLI(items, name)
+		},
+	}
+}
+
+func (a *cliApp) newTaskRemoveCommand() *cobra.Command {
+	var force bool
+	cmd := &cobra.Command{
+		Use:   "rm <task>",
+		Short: "Remove a task definition",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(_ *cobra.Command, args []string) error {
+			_, store, items, err := loadTaskStore()
+			if err != nil {
+				return err
+			}
+			return executeTaskRemoveCLI(store, items, args[0], force, a.stdin, a.stdout, a.stderr)
+		},
+	}
+	cmd.Flags().BoolVar(&force, "force", false, "Remove without interactive confirmation")
+	return cmd
+}
+
+func findTask(items []task.Task, name string) (task.Task, error) {
+	for _, item := range items {
+		fileName := strings.TrimSuffix(item.File, filepath.Ext(item.File))
+		if strings.EqualFold(item.Name, name) || strings.EqualFold(fileName, name) || strings.EqualFold(item.File, name) {
+			return item, nil
+		}
+	}
+	return task.Task{}, fmt.Errorf("task %q not found", name)
 }

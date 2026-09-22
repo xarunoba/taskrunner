@@ -5,10 +5,12 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"text/tabwriter"
 	"time"
 
+	"github.com/spf13/cobra"
 	"github.com/xarunoba/taskrunner/internal/daemon"
 )
 
@@ -315,4 +317,248 @@ func jobActionName(action jobAction) string {
 	default:
 		return "manage"
 	}
+}
+
+type jobListOptions struct {
+	status     daemon.Status
+	filterTask string
+	limit      int
+	all        bool
+	json       bool
+	quiet      bool
+}
+
+type jobLogsOptions struct {
+	tailSet bool
+	tail    int
+	follow  bool
+}
+
+type jobPruneOptions struct {
+	status daemon.Status
+	before time.Duration
+	force  bool
+}
+
+type jobAction uint8
+
+const (
+	jobWait jobAction = iota + 1
+	jobInspect
+	jobCancel
+	jobRerun
+	jobRemove
+)
+
+// Execute parses args and runs the selected command.
+
+func (a *cliApp) newJobsCommand() *cobra.Command {
+	var (
+		options     jobListOptions
+		statusValue string
+	)
+	cmd := &cobra.Command{
+		Use:   "jobs",
+		Short: "List jobs",
+		Args:  cobra.NoArgs,
+		PreRunE: func(cmd *cobra.Command, _ []string) error {
+			if statusValue != "" {
+				status, err := parseJobStatus(statusValue)
+				if err != nil {
+					return err
+				}
+				options.status = status
+			}
+			if cmd.Flags().Changed("limit") && options.limit < 1 {
+				return errors.New("--limit requires a positive integer")
+			}
+			if options.json && options.quiet {
+				return errors.New("--json and --quiet cannot be used together")
+			}
+			return nil
+		},
+		RunE: func(_ *cobra.Command, _ []string) error {
+			workspace, err := workspacePath()
+			if err != nil {
+				return err
+			}
+			return executeJobsCLI(workspace, options, a.stdout)
+		},
+	}
+	cmd.Flags().BoolVarP(&options.all, "all", "a", false, "Include completed jobs")
+	cmd.Flags().StringVar(&statusValue, "status", "", "Filter by job status")
+	cmd.Flags().StringVar(&options.filterTask, "task", "", "Filter by task name or filename")
+	cmd.Flags().IntVar(&options.limit, "limit", 0, "Limit matching jobs")
+	cmd.Flags().BoolVar(&options.json, "json", false, "Emit a JSON array")
+	cmd.Flags().BoolVar(&options.quiet, "quiet", false, "Print full job IDs only")
+	return cmd
+}
+
+func (a *cliApp) newJobCommand() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "job",
+		Short: "Manage jobs",
+		Long:  "Manage jobs. Job references accept a full ID or a unique ID prefix or suffix.",
+	}
+	cmd.AddCommand(
+		a.newJobLogsCommand(),
+		a.newJobReferenceCommand("wait <job>", "Wait for a job to finish", jobWait),
+		a.newJobInspectCommand(),
+		a.newJobReferenceCommand("cancel <job>", "Cancel a queued or running job", jobCancel),
+		a.newJobReferenceCommand("rerun <job>", "Start a new job with the same command and policy", jobRerun),
+		a.newJobReferenceCommand("rm <job>", "Remove a completed job and its output", jobRemove),
+		a.newJobPruneCommand(),
+	)
+	return cmd
+}
+
+func (a *cliApp) newJobLogsCommand() *cobra.Command {
+	options := jobLogsOptions{tail: -1}
+	cmd := &cobra.Command{
+		Use:   "logs <job>",
+		Short: "Print or follow job output",
+		Args:  cobra.ExactArgs(1),
+		PreRunE: func(cmd *cobra.Command, _ []string) error {
+			options.tailSet = cmd.Flags().Changed("tail")
+			if options.tailSet && options.tail < 0 {
+				return errors.New("--tail requires a non-negative integer")
+			}
+			return nil
+		},
+		RunE: func(_ *cobra.Command, args []string) error {
+			workspace, err := workspacePath()
+			if err != nil {
+				return err
+			}
+			return executeJobLogsByReference(workspace, args[0], options, a.stdout)
+		},
+	}
+	cmd.Flags().BoolVarP(&options.follow, "follow", "f", false, "Follow output until the job finishes")
+	cmd.Flags().IntVar(&options.tail, "tail", -1, "Print only the final number of existing lines")
+	return cmd
+}
+
+func (a *cliApp) newJobInspectCommand() *cobra.Command {
+	var jsonOutput bool
+	cmd := &cobra.Command{
+		Use:   "inspect <job>",
+		Short: "Print job details",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(_ *cobra.Command, args []string) error {
+			workspace, err := workspacePath()
+			if err != nil {
+				return err
+			}
+			return executeJobByReference(workspace, args[0], jobInspect, jsonOutput, a.stdout)
+		},
+	}
+	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Emit JSON")
+	return cmd
+}
+
+func (a *cliApp) newJobReferenceCommand(use, short string, action jobAction) *cobra.Command {
+	return &cobra.Command{
+		Use:   use,
+		Short: short,
+		Args:  cobra.ExactArgs(1),
+		RunE: func(_ *cobra.Command, args []string) error {
+			workspace, err := workspacePath()
+			if err != nil {
+				return err
+			}
+			return executeJobByReference(workspace, args[0], action, false, a.stdout)
+		},
+	}
+}
+
+func (a *cliApp) newJobPruneCommand() *cobra.Command {
+	var (
+		options     jobPruneOptions
+		statusValue string
+		beforeValue string
+	)
+	cmd := &cobra.Command{
+		Use:   "prune",
+		Short: "Remove matching completed jobs",
+		Args:  cobra.NoArgs,
+		PreRunE: func(_ *cobra.Command, _ []string) error {
+			if statusValue != "" {
+				status, err := parseJobStatus(statusValue)
+				if err != nil {
+					return err
+				}
+				if status == daemon.StatusQueued || status == daemon.StatusRunning {
+					return errors.New("job prune only accepts completed statuses")
+				}
+				options.status = status
+			}
+			if beforeValue != "" {
+				before, err := parseAge(beforeValue)
+				if err != nil {
+					return fmt.Errorf("invalid --before value: %w", err)
+				}
+				options.before = before
+			}
+			return nil
+		},
+		RunE: func(_ *cobra.Command, _ []string) error {
+			workspace, err := workspacePath()
+			if err != nil {
+				return err
+			}
+			return executeJobPruneCLI(daemon.NewClient(workspace), options, a.stdin, a.stdout, a.stderr)
+		},
+	}
+	cmd.Flags().StringVar(&statusValue, "status", "", "Remove only jobs with this completed status")
+	cmd.Flags().StringVar(&beforeValue, "before", "", "Remove jobs older than an age such as 24h or 7d")
+	cmd.Flags().BoolVar(&options.force, "force", false, "Remove without interactive confirmation")
+	return cmd
+}
+
+func parseJobStatus(value string) (daemon.Status, error) {
+	status := daemon.Status(value)
+	switch status {
+	case daemon.StatusQueued, daemon.StatusRunning, daemon.StatusSucceeded, daemon.StatusFailed, daemon.StatusCanceled:
+		return status, nil
+	default:
+		return "", fmt.Errorf("unknown job status %q", value)
+	}
+}
+
+func parseAge(value string) (time.Duration, error) {
+	if days, ok := strings.CutSuffix(value, "d"); ok {
+		count, err := strconv.Atoi(days)
+		if err != nil || count < 1 {
+			return 0, errors.New("day duration must be a positive integer such as 7d")
+		}
+		return time.Duration(count) * 24 * time.Hour, nil
+	}
+	duration, err := time.ParseDuration(value)
+	if err != nil || duration <= 0 {
+		return 0, errors.New("duration must be positive, such as 24h or 7d")
+	}
+	return duration, nil
+}
+
+func findJob(jobs []daemon.Job, reference string) (daemon.Job, error) {
+	for _, job := range jobs {
+		if job.ID == reference {
+			return job, nil
+		}
+	}
+
+	var match *daemon.Job
+	for i := range jobs {
+		if !strings.HasPrefix(jobs[i].ID, reference) && !strings.HasSuffix(jobs[i].ID, reference) {
+			continue
+		}
+		if match != nil {
+			return daemon.Job{}, fmt.Errorf("job reference %q is ambiguous", reference)
+		}
+		match = &jobs[i]
+	}
+	if match == nil {
+		return daemon.Job{}, fmt.Errorf("job %q not found", reference)
+	}
+	return *match, nil
 }
