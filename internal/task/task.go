@@ -9,6 +9,14 @@ const (
 	FieldConfirm FieldType = "confirm"
 )
 
+type JobPolicy string
+
+const (
+	JobSequential     JobPolicy = ""
+	JobParallel       JobPolicy = "parallel"
+	JobCancelPrevious JobPolicy = "cancel_previous"
+)
+
 // Field describes one value collected before a task runs.
 type Field struct {
 	Key      string    `json:"key"`
@@ -21,8 +29,9 @@ type Field struct {
 
 // Task is a shell command and its runtime form.
 type Task struct {
-	Name    string  `json:"name"`
-	Command string  `json:"command"`
-	Fields  []Field `json:"fields,omitempty"`
-	File    string  `json:"-"`
+	Name      string    `json:"name"`
+	Command   string    `json:"command"`
+	Fields    []Field   `json:"fields,omitempty"`
+	JobPolicy JobPolicy `json:"job_policy,omitempty"`
+	File      string    `json:"-"`
 }

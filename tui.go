@@ -2,17 +2,18 @@ package main
 
 import (
 	"fmt"
-	"os"
-	"os/exec"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/filepicker"
 	"github.com/charmbracelet/bubbles/textinput"
+	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/xarunoba/taskrunner/internal/daemon"
 	"github.com/xarunoba/taskrunner/internal/task"
 )
 
@@ -23,6 +24,8 @@ const (
 	screenTask
 	screenField
 	screenRun
+	screenJobs
+	screenResult
 )
 
 var (
@@ -43,26 +46,63 @@ var fieldTypes = []task.FieldType{
 	task.FieldConfirm,
 }
 
-type commandDoneMsg struct {
-	name string
-	err  error
+var jobPolicies = []task.JobPolicy{
+	task.JobSequential,
+	task.JobParallel,
+	task.JobCancelPrevious,
+}
+
+var jobPolicyLabels = []string{
+	"Sequential",
+	"Parallel",
+	"Cancel previous",
+}
+
+type daemonPollMsg struct {
+	jobs    []daemon.Job
+	details map[string]daemon.Job
+	err     error
+}
+
+type taskStartedMsg struct {
+	job daemon.Job
+	err error
+}
+
+type jobOpenedMsg struct {
+	job daemon.Job
+	err error
+}
+
+type jobActionMsg struct {
+	action string
+	job    daemon.Job
+	err    error
 }
 
 type model struct {
 	store       *task.Store
+	daemon      *daemon.Client
 	tasks       []task.Task
+	jobs        []daemon.Job
+	running     map[string]int
+	queued      map[string]int
+	latest      map[string]daemon.Status
+	trackedJobs map[string]struct{}
 	cursor      int
+	jobCursor   int
 	screen      screen
 	status      string
 	statusError bool
 	width       int
 	height      int
 
-	taskInputs  [2]textinput.Model
-	taskFocus   int
-	formFields  []task.Field
-	fieldCursor int
-	editingFile string
+	taskInputs    [2]textinput.Model
+	taskFocus     int
+	formFields    []task.Field
+	formJobPolicy task.JobPolicy
+	fieldCursor   int
+	editingFile   string
 
 	fieldInputs     [3]textinput.Model
 	fieldFocus      int
@@ -81,6 +121,9 @@ type model struct {
 	choiceCursor    int
 	confirmationYes bool
 	filePicker      filepicker.Model
+
+	result         daemon.Job
+	resultViewport viewport.Model
 }
 
 func newModel(store *task.Store, tasks []task.Task) model {
@@ -89,13 +132,20 @@ func newModel(store *task.Store, tasks []task.Task) model {
 	key := newInput("environment", 50)
 	label := newInput("Environment", 100)
 	options := newInput("development, staging, production", 1000)
+	resultViewport := viewport.New(1, 1)
 
 	return model{
-		store:        store,
-		tasks:        tasks,
-		taskInputs:   [2]textinput.Model{name, command},
-		fieldInputs:  [3]textinput.Model{key, label, options},
-		editingField: -1,
+		store:          store,
+		daemon:         daemon.NewClient(store.Workspace()),
+		tasks:          tasks,
+		running:        make(map[string]int),
+		queued:         make(map[string]int),
+		latest:         make(map[string]daemon.Status),
+		trackedJobs:    make(map[string]struct{}),
+		taskInputs:     [2]textinput.Model{name, command},
+		fieldInputs:    [3]textinput.Model{key, label, options},
+		editingField:   -1,
+		resultViewport: resultViewport,
 	}
 }
 
@@ -120,6 +170,7 @@ func (m *model) resize(width, height int) {
 	}
 	m.runInput.Width = inputWidth
 	m.filePicker.SetHeight(m.filePickerHeight())
+	m.resizeResultViewport()
 }
 
 func (m model) contentWidth() int {
@@ -127,11 +178,7 @@ func (m model) contentWidth() int {
 	if width <= 0 {
 		width = 80
 	}
-	width -= panelStyle.GetHorizontalFrameSize()
-	if width > 90 {
-		return 90
-	}
-	return max(1, width)
+	return max(1, width-panelStyle.GetHorizontalFrameSize())
 }
 
 func (m model) contentHeight() int {
@@ -146,6 +193,29 @@ func (m model) filePickerHeight() int {
 	return max(1, m.contentHeight()-8)
 }
 
+func (m *model) resizeResultViewport() {
+	atBottom := m.resultViewport.AtBottom()
+	m.resultViewport.Width = m.contentWidth()
+	chromeHeight := 3 // Title, status, and footer.
+	if m.result.StorageError != "" {
+		chromeHeight++
+	}
+	if m.showResultCommand() {
+		chromeHeight++
+	}
+	if m.gap() == "\n\n" {
+		chromeHeight += 2
+	}
+	m.resultViewport.Height = max(1, m.contentHeight()-chromeHeight)
+	if atBottom {
+		m.resultViewport.GotoBottom()
+	}
+}
+
+func (m model) showResultCommand() bool {
+	return m.contentHeight() >= 8 && m.result.Command != ""
+}
+
 func (m model) gap() string {
 	if m.height > 0 && m.height < 24 {
 		return "\n"
@@ -154,7 +224,45 @@ func (m model) gap() string {
 }
 
 func (m model) Init() tea.Cmd {
-	return textinput.Blink
+	return tea.Batch(textinput.Blink, m.pollDaemon())
+}
+
+func (m model) pollDaemon() tea.Cmd {
+	client := m.daemon
+	tracked := make(map[string]struct{}, len(m.trackedJobs))
+	for id := range m.trackedJobs {
+		tracked[id] = struct{}{}
+	}
+	resultID := ""
+	resultOffset := 0
+	if m.screen == screenResult && m.result.ID != "" && !m.result.Done() {
+		resultID = m.result.ID
+		resultOffset = m.result.OutputSize
+	}
+	return tea.Tick(250*time.Millisecond, func(time.Time) tea.Msg {
+		jobs, err := client.Jobs()
+		if err != nil {
+			return daemonPollMsg{err: err}
+		}
+		details := make(map[string]daemon.Job)
+		for _, job := range jobs {
+			offset := 0
+			_, trackedJob := tracked[job.ID]
+			switch {
+			case trackedJob && job.Done():
+			case job.ID == resultID:
+				offset = resultOffset
+			default:
+				continue
+			}
+			detail, err := client.Job(job.ID, offset)
+			if err != nil {
+				return daemonPollMsg{err: err}
+			}
+			details[job.ID] = detail
+		}
+		return daemonPollMsg{jobs: jobs, details: details}
+	})
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -162,13 +270,29 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.resize(msg.Width, msg.Height)
 		return m, nil
-	case commandDoneMsg:
-		m.statusError = msg.err != nil
+	case daemonPollMsg:
+		m.applyDaemonPoll(msg)
+		return m, m.pollDaemon()
+	case taskStartedMsg:
 		if msg.err != nil {
-			m.status = fmt.Sprintf("%s failed: %v", msg.name, msg.err)
-		} else {
-			m.status = fmt.Sprintf("%s finished", msg.name)
+			m.setError(msg.err)
+			return m, nil
 		}
+		m.trackedJobs[msg.job.ID] = struct{}{}
+		return m, nil
+	case jobOpenedMsg:
+		if msg.err != nil {
+			m.setError(msg.err)
+			return m, nil
+		}
+		m.openResult(msg.job)
+		return m, nil
+	case jobActionMsg:
+		if msg.err != nil {
+			m.setError(msg.err)
+			return m, nil
+		}
+		m.applyJobAction(msg)
 		return m, nil
 	case tea.MouseMsg:
 		return m.updateMouse(msg)
@@ -185,6 +309,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateFieldForm(msg)
 	case screenRun:
 		return m.updateRunForm(msg)
+	case screenJobs:
+		return m.updateJobs(msg)
+	case screenResult:
+		return m.updateResult(msg)
 	default:
 		key, ok := msg.(tea.KeyMsg)
 		if !ok {
@@ -197,6 +325,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m model) updateMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	event := tea.MouseEvent(msg)
 	if event.IsWheel() {
+		if m.screen == screenResult {
+			return m.updateResult(msg)
+		}
 		keyType := tea.KeyDown
 		if event.Button == tea.MouseButtonWheelUp {
 			keyType = tea.KeyUp
@@ -209,12 +340,20 @@ func (m model) updateMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 			return m.updateFieldForm(key)
 		case screenRun:
 			return m.updateRunForm(key)
+		case screenJobs:
+			return m.updateJobs(key)
 		default:
 			return m.updateList(key)
 		}
 	}
 	if event.Action != tea.MouseActionPress || event.Button != tea.MouseButtonLeft {
 		return m, nil
+	}
+	if m.screen == screenList || m.screen == screenJobs {
+		if screen, ok := m.topLevelTabAt(event.Y, event.X); ok {
+			m.screen = screen
+			return m, nil
+		}
 	}
 
 	line := m.mouseLine(event.Y)
@@ -225,8 +364,26 @@ func (m model) updateMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		return m.clickFieldForm(line, event.X)
 	case screenRun:
 		return m.clickRunForm(line, event.X)
+	case screenJobs:
+		return m.clickJobs(line, event.X)
+	case screenResult:
+		if !m.mouseLineIsLastMatch(event.Y, "esc back") {
+			return m, nil
+		}
+		switch optionAtX(line, event.X-3, []string{"esc back", "c cancel", "r rerun", "d delete output"}) {
+		case 0:
+			m.screen = screenJobs
+			return m, nil
+		case 1:
+			return m.updateResult(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'c'}})
+		case 2:
+			return m.updateResult(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
+		case 3:
+			return m.updateResult(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+		}
+		return m, nil
 	default:
-		return m.clickTaskList(line)
+		return m.clickTaskList(line, event.X)
 	}
 }
 
@@ -241,9 +398,30 @@ func (m model) mouseLine(y int) string {
 	return strings.TrimSpace(line)
 }
 
-func (m model) clickTaskList(line string) (tea.Model, tea.Cmd) {
-	if line == "" {
-		return m, nil
+func (m model) mouseLineIsLastMatch(y int, text string) bool {
+	lines := strings.Split(ansi.Strip(m.View()), "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		if strings.Contains(lines[i], text) {
+			return y == i
+		}
+	}
+	return false
+}
+
+func (m model) clickTaskList(line string, x int) (tea.Model, tea.Cmd) {
+	if strings.Contains(line, "enter run") {
+		switch optionAtX(line, x-3, []string{"enter run", "n new", "e edit", "d delete", "q quit"}) {
+		case 0:
+			return m.updateList(tea.KeyMsg{Type: tea.KeyEnter})
+		case 1:
+			return m.updateList(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
+		case 2:
+			return m.updateList(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'e'}})
+		case 3:
+			return m.updateList(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+		case 4:
+			return m, tea.Quit
+		}
 	}
 	for i, item := range m.tasks {
 		name := ansi.Truncate(item.Name, max(1, m.contentWidth()-2), "…")
@@ -253,6 +431,56 @@ func (m model) clickTaskList(line string) (tea.Model, tea.Cmd) {
 		}
 	}
 	return m, nil
+}
+
+func (m model) clickJobs(line string, x int) (tea.Model, tea.Cmd) {
+	if strings.Contains(line, "enter log") {
+		switch optionAtX(line, x-3, []string{"enter log", "c cancel", "r rerun", "d delete output", "q quit"}) {
+		case 0:
+			return m.updateJobs(tea.KeyMsg{Type: tea.KeyEnter})
+		case 1:
+			return m.updateJobs(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'c'}})
+		case 2:
+			return m.updateJobs(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
+		case 3:
+			return m.updateJobs(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+		case 4:
+			return m, tea.Quit
+		}
+	}
+	for i := range m.jobs {
+		job := m.jobs[len(m.jobs)-1-i]
+		if !strings.Contains(line, shortJobID(job.ID)) {
+			continue
+		}
+		if m.jobCursor == i {
+			return m, m.openJob(job.ID)
+		}
+		m.jobCursor = i
+		return m, nil
+	}
+	return m, nil
+}
+
+func (m model) topLevelTabAt(y, x int) (screen, bool) {
+	lines := strings.Split(ansi.Strip(m.View()), "\n")
+	if y < 0 || y >= len(lines) {
+		return 0, false
+	}
+	line := lines[y]
+	for _, tab := range []struct {
+		label  string
+		screen screen
+	}{
+		{label: "Tasks", screen: screenList},
+		{label: "Jobs", screen: screenJobs},
+	} {
+		start := strings.Index(line, tab.label)
+		if start >= 0 && x >= start && x < start+len(tab.label) {
+			return tab.screen, true
+		}
+	}
+	return 0, false
 }
 
 func (m model) clickTaskForm(line string, x int) (tea.Model, tea.Cmd) {
@@ -265,13 +493,19 @@ func (m model) clickTaskForm(line string, x int) (tea.Model, tea.Cmd) {
 		m.taskFocus = 1
 		m.taskInputs[1].SetCursor(max(0, x-3))
 		return m, m.focusTaskControl()
+	case strings.Contains(line, "Sequential") || strings.Contains(line, "Parallel") || strings.Contains(line, "Cancel previous"):
+		if selected := optionAtX(line, x-3, jobPolicyLabels); selected >= 0 {
+			m.formJobPolicy = jobPolicies[selected]
+			m.taskFocus = 2
+			return m, m.focusTaskControl()
+		}
 	case line == "Fields" || strings.Contains(line, "No fields."):
-		m.taskFocus = 2
+		m.taskFocus = 3
 		return m, m.focusTaskControl()
 	}
 	for i, field := range m.formFields {
 		if strings.Contains(line, field.Label) {
-			m.taskFocus = 2
+			m.taskFocus = 3
 			m.fieldCursor = i
 			return m, m.focusTaskControl()
 		}
@@ -366,6 +600,9 @@ func (m model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "q":
 		return m, tea.Quit
+	case "tab", "shift+tab":
+		m.screen = screenJobs
+		m.jobCursor = 0
 	case "up", "k":
 		if m.cursor > 0 {
 			m.cursor--
@@ -412,13 +649,13 @@ func (m model) updateTaskForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "ctrl+s", "f2":
 			return m.saveTaskForm()
 		case "tab":
-			m.taskFocus = (m.taskFocus + 1) % 3
+			m.taskFocus = (m.taskFocus + 1) % 4
 			return m, m.focusTaskControl()
 		case "shift+tab":
-			m.taskFocus = (m.taskFocus + 2) % 3
+			m.taskFocus = (m.taskFocus + 3) % 4
 			return m, m.focusTaskControl()
 		case "up":
-			if m.taskFocus == 2 && m.fieldCursor > 0 {
+			if m.taskFocus == 3 && m.fieldCursor > 0 {
 				m.fieldCursor--
 				return m, nil
 			}
@@ -427,7 +664,7 @@ func (m model) updateTaskForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, m.focusTaskControl()
 			}
 		case "down":
-			if m.taskFocus == 2 {
+			if m.taskFocus == 3 {
 				if m.fieldCursor < len(m.formFields)-1 {
 					m.fieldCursor++
 				}
@@ -436,7 +673,7 @@ func (m model) updateTaskForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.taskFocus++
 			return m, m.focusTaskControl()
 		case "enter":
-			if m.taskFocus < 2 {
+			if m.taskFocus < 3 {
 				m.taskFocus++
 				return m, m.focusTaskControl()
 			}
@@ -450,11 +687,20 @@ func (m model) updateTaskForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		if m.taskFocus == 2 {
 			switch key.String() {
+			case "left", "h":
+				m.moveJobPolicy(-1)
+			case "right", "l", " ":
+				m.moveJobPolicy(1)
+			}
+			return m, nil
+		}
+		if m.taskFocus == 3 {
+			switch key.String() {
 			case "k":
 				if m.fieldCursor > 0 {
 					m.fieldCursor--
 				} else {
-					m.taskFocus = 1
+					m.taskFocus = 2
 					return m, m.focusTaskControl()
 				}
 			case "j":
@@ -489,7 +735,7 @@ func (m model) updateTaskForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 
-	if m.taskFocus == 2 {
+	if m.taskFocus >= 2 {
 		return m, nil
 	}
 
@@ -498,12 +744,28 @@ func (m model) updateTaskForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
+func (m *model) moveJobPolicy(direction int) {
+	index := jobPolicyIndex(m.formJobPolicy)
+	index = (index + direction + len(jobPolicies)) % len(jobPolicies)
+	m.formJobPolicy = jobPolicies[index]
+}
+
+func jobPolicyIndex(policy task.JobPolicy) int {
+	for i, candidate := range jobPolicies {
+		if candidate == policy {
+			return i
+		}
+	}
+	return 0
+}
+
 func (m *model) openTaskForm(item task.Task) {
 	m.screen = screenTask
 	m.editingFile = item.File
 	m.taskInputs[0].SetValue(item.Name)
 	m.taskInputs[1].SetValue(item.Command)
 	m.formFields = cloneFields(item.Fields)
+	m.formJobPolicy = item.JobPolicy
 	m.taskFocus = 0
 	m.fieldCursor = 0
 	m.status = ""
@@ -514,6 +776,7 @@ func (m *model) closeTaskForm() {
 	m.screen = screenList
 	m.editingFile = ""
 	m.formFields = nil
+	m.formJobPolicy = task.JobSequential
 	for i := range m.taskInputs {
 		m.taskInputs[i].Blur()
 		m.taskInputs[i].SetValue("")
@@ -534,9 +797,10 @@ func (m *model) focusTaskControl() tea.Cmd {
 
 func (m model) saveTaskForm() (tea.Model, tea.Cmd) {
 	item := task.Task{
-		Name:    m.taskInputs[0].Value(),
-		Command: m.taskInputs[1].Value(),
-		Fields:  cloneFields(m.formFields),
+		Name:      m.taskInputs[0].Value(),
+		Command:   m.taskInputs[1].Value(),
+		Fields:    cloneFields(m.formFields),
+		JobPolicy: m.formJobPolicy,
 	}
 	saved, err := m.store.Save(item, m.editingFile)
 	if err != nil {
@@ -563,7 +827,7 @@ func (m model) updateFieldForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch key.String() {
 		case "esc":
 			m.screen = screenTask
-			m.taskFocus = 2
+			m.taskFocus = 3
 			return m, m.focusTaskControl()
 		case "ctrl+s", "enter":
 			return m.saveFieldForm()
@@ -705,7 +969,7 @@ func (m model) saveFieldForm() (tea.Model, tea.Cmd) {
 		m.fieldCursor = len(fields) - 1
 	}
 	m.screen = screenTask
-	m.taskFocus = 2
+	m.taskFocus = 3
 	m.status = ""
 	return m, m.focusTaskControl()
 }
@@ -945,14 +1209,22 @@ func (m model) executeRun() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	m.screen = screenList
+	m.status = ""
+	m.statusError = false
 	if m.runTask.File != "" {
 		if err := m.store.RecordValueHistory(m.runTask, m.runValues); err != nil {
 			m.setError(fmt.Errorf("running %s; save value history: %w", m.runTask.Name, err))
-			return m, runCommand(m.store.Workspace(), m.runTask.Name, command)
 		}
 	}
-	m.setStatus(fmt.Sprintf("Running %s...", m.runTask.Name))
-	return m, runCommand(m.store.Workspace(), m.runTask.Name, command)
+	client := m.daemon
+	item := m.runTask
+	return m, func() tea.Msg {
+		job, err := client.Start(item.File, item.Name, command, item.JobPolicy)
+		if err != nil {
+			err = fmt.Errorf("start %s: %w", item.Name, err)
+		}
+		return taskStartedMsg{job: job, err: err}
+	}
 }
 
 func cloneFields(fields []task.Field) []task.Field {
@@ -988,16 +1260,217 @@ func (m *model) setStatus(status string) {
 	m.statusError = false
 }
 
-func runCommand(workspace, name, command string) tea.Cmd {
-	shell := os.Getenv("SHELL")
-	if shell == "" {
-		shell = "/bin/sh"
+func (m *model) applyDaemonPoll(msg daemonPollMsg) {
+	if msg.err != nil {
+		m.setError(fmt.Errorf("poll daemon: %w", msg.err))
+		return
 	}
-	cmd := exec.Command(shell, "-c", command)
-	cmd.Dir = workspace
-	return tea.ExecProcess(cmd, func(err error) tea.Msg {
-		return commandDoneMsg{name: name, err: err}
-	})
+	m.jobs = msg.jobs
+	clear(m.running)
+	clear(m.queued)
+	clear(m.latest)
+	for _, job := range m.jobs {
+		m.latest[job.TaskID] = job.Status
+		switch job.Status {
+		case daemon.StatusRunning:
+			m.running[job.TaskID]++
+		case daemon.StatusQueued:
+			m.queued[job.TaskID]++
+		}
+	}
+	if m.jobCursor >= len(m.jobs) && m.jobCursor > 0 {
+		m.jobCursor = len(m.jobs) - 1
+	}
+
+	for _, job := range m.jobs {
+		detail, ok := msg.details[job.ID]
+		if !ok {
+			continue
+		}
+		if m.result.ID == job.ID {
+			m.updateOpenResult(detail)
+		}
+		if _, tracked := m.trackedJobs[job.ID]; tracked && job.Done() {
+			delete(m.trackedJobs, job.ID)
+			if m.screen == screenList {
+				m.openResult(detail)
+			}
+		}
+	}
+}
+
+func (m *model) updateOpenResult(job daemon.Job) {
+	atBottom := m.resultViewport.AtBottom()
+	if len(job.Output) == job.OutputSize {
+		m.result.Output = job.Output
+	} else {
+		m.result.Output += job.Output
+	}
+	job.Output = m.result.Output
+	m.result = job
+	m.setResultContent()
+	if atBottom {
+		m.resultViewport.GotoBottom()
+	}
+}
+
+func (m *model) openResult(job daemon.Job) {
+	m.result = job
+	m.setResultContent()
+	m.resultViewport.GotoBottom()
+	m.screen = screenResult
+}
+
+func (m *model) setResultContent() {
+	output := ansi.Strip(m.result.Output)
+	output = strings.ReplaceAll(output, "\r\n", "\n")
+	output = strings.ReplaceAll(output, "\r", "\n")
+	output = strings.TrimRight(output, "\n")
+	if output == "" {
+		output = "(no output)"
+	}
+	m.resultViewport.SetContent(output)
+	m.resizeResultViewport()
+}
+
+func (m model) openJob(id string) tea.Cmd {
+	client := m.daemon
+	return func() tea.Msg {
+		job, err := client.Job(id, 0)
+		if err != nil {
+			err = fmt.Errorf("open job: %w", err)
+		}
+		return jobOpenedMsg{job: job, err: err}
+	}
+}
+
+func (m model) jobAction(action, id string) tea.Cmd {
+	client := m.daemon
+	return func() tea.Msg {
+		var (
+			job daemon.Job
+			err error
+		)
+		switch action {
+		case "cancel":
+			job, err = client.Cancel(id)
+		case "rerun":
+			job, err = client.Rerun(id)
+		case "delete":
+			job, err = client.DeleteOutput(id)
+		}
+		if err != nil {
+			operation := action + " job"
+			if action == "delete" {
+				operation = "delete job output"
+			}
+			err = fmt.Errorf("%s: %w", operation, err)
+		}
+		return jobActionMsg{action: action, job: job, err: err}
+	}
+}
+
+func (m *model) applyJobAction(msg jobActionMsg) {
+	switch msg.action {
+	case "rerun":
+		m.jobs = append(m.jobs, msg.job)
+		m.trackedJobs[msg.job.ID] = struct{}{}
+		m.jobCursor = 0
+		m.setStatus(fmt.Sprintf("Started new job for %s", msg.job.Name))
+		m.screen = screenJobs
+	default:
+		for i := range m.jobs {
+			if m.jobs[i].ID == msg.job.ID {
+				m.jobs[i] = msg.job
+				break
+			}
+		}
+		if msg.action == "delete" {
+			if m.result.ID == msg.job.ID {
+				m.result = msg.job
+				m.setResultContent()
+			}
+			m.setStatus(fmt.Sprintf("Deleted output for %s %s", msg.job.Name, shortJobID(msg.job.ID)))
+		} else {
+			m.setStatus(fmt.Sprintf("Cancel requested for %s %s", msg.job.Name, shortJobID(msg.job.ID)))
+		}
+	}
+}
+
+func (m model) updateJobs(msg tea.Msg) (tea.Model, tea.Cmd) {
+	key, ok := msg.(tea.KeyMsg)
+	if !ok {
+		return m, nil
+	}
+	switch key.String() {
+	case "q":
+		return m, tea.Quit
+	case "tab", "shift+tab":
+		m.screen = screenList
+	case "up", "k":
+		if m.jobCursor > 0 {
+			m.jobCursor--
+		}
+	case "down", "j":
+		if m.jobCursor < len(m.jobs)-1 {
+			m.jobCursor++
+		}
+	case "enter":
+		job, ok := m.selectedJob()
+		if ok {
+			return m, m.openJob(job.ID)
+		}
+	case "c", "r", "d":
+		job, ok := m.selectedJob()
+		if !ok {
+			break
+		}
+		action := "delete"
+		if key.String() == "c" {
+			action = "cancel"
+		} else if key.String() == "r" {
+			action = "rerun"
+		}
+		return m, m.jobAction(action, job.ID)
+	}
+	return m, nil
+}
+
+func (m model) selectedJob() (daemon.Job, bool) {
+	if len(m.jobs) == 0 || m.jobCursor < 0 || m.jobCursor >= len(m.jobs) {
+		return daemon.Job{}, false
+	}
+	return m.jobs[len(m.jobs)-1-m.jobCursor], true
+}
+
+func (m model) updateResult(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if key, ok := msg.(tea.KeyMsg); ok {
+		switch key.String() {
+		case "esc":
+			m.screen = screenJobs
+			return m, nil
+		case "home", "g":
+			m.resultViewport.GotoTop()
+			return m, nil
+		case "end", "G":
+			m.resultViewport.GotoBottom()
+			return m, nil
+		case "c", "r", "d":
+			if m.result.ID == "" {
+				return m, nil
+			}
+			action := "delete"
+			if key.String() == "c" {
+				action = "cancel"
+			} else if key.String() == "r" {
+				action = "rerun"
+			}
+			return m, m.jobAction(action, m.result.ID)
+		}
+	}
+	var cmd tea.Cmd
+	m.resultViewport, cmd = m.resultViewport.Update(msg)
+	return m, cmd
 }
 
 func (m model) View() string {
@@ -1008,31 +1481,51 @@ func (m model) View() string {
 		return m.fieldFormView()
 	case screenRun:
 		return m.runFormView()
+	case screenJobs:
+		return m.jobsView()
+	case screenResult:
+		return m.resultView()
 	default:
 		return m.listView()
 	}
 }
 
-func (m model) listView() string {
+func (m model) workspaceHeader(active screen) string {
 	var body strings.Builder
 	body.WriteString(accentStyle.Render("TASKRUNNER"))
-	body.WriteString("\n")
+	body.WriteByte('\n')
 	body.WriteString(mutedStyle.Render(m.store.Workspace()))
+	body.WriteString(m.gap())
+	if active == screenList {
+		body.WriteString(selectedStyle.Render("Tasks"))
+		body.WriteString("  ")
+		body.WriteString(mutedStyle.Render("Jobs"))
+	} else {
+		body.WriteString(mutedStyle.Render("Tasks"))
+		body.WriteString("  ")
+		body.WriteString(selectedStyle.Render("Jobs"))
+	}
+	return body.String()
+}
+
+func (m model) listView() string {
+	var body strings.Builder
+	body.WriteString(m.workspaceHeader(screenList))
 	body.WriteString(m.gap())
 
 	if len(m.tasks) == 0 {
 		body.WriteString(mutedStyle.Render("No tasks yet. Press n to create one."))
 	} else {
-		start, end := visibleRange(len(m.tasks), m.cursor, max(1, m.contentHeight()-10))
+		start, end := visibleRange(len(m.tasks), m.cursor, max(1, m.contentHeight()-12))
 		if start > 0 {
 			body.WriteString(mutedStyle.Render(fmt.Sprintf("↑ %d more", start)))
 			body.WriteByte('\n')
 		}
 		for i := start; i < end; i++ {
 			item := m.tasks[i]
-			name := "  " + item.Name
+			name := "  " + item.Name + m.taskActivity(item.File)
 			if i == m.cursor {
-				name = selectedStyle.Render("› " + item.Name)
+				name = selectedStyle.Render("› " + item.Name + m.taskActivity(item.File))
 			}
 			body.WriteString(name)
 			body.WriteByte('\n')
@@ -1041,7 +1534,11 @@ func (m model) listView() string {
 				body.WriteString(mutedStyle.Render(item.Command))
 				body.WriteByte('\n')
 				body.WriteString("  ")
-				body.WriteString(mutedStyle.Render(fmt.Sprintf("%d fields", len(item.Fields))))
+				body.WriteString(mutedStyle.Render(fmt.Sprintf(
+					"%d fields • %s",
+					len(item.Fields),
+					jobPolicySummary(item.JobPolicy),
+				)))
 				body.WriteByte('\n')
 			}
 		}
@@ -1052,9 +1549,84 @@ func (m model) listView() string {
 	}
 
 	body.WriteString(m.gap())
-	body.WriteString(mutedStyle.Render("enter run • n new • e edit • d delete • q quit"))
+	body.WriteString(mutedStyle.Render("tab switch • enter run • n new • e edit • d delete • q quit"))
 	body.WriteString(m.statusView())
 	return m.renderPanel(body.String())
+}
+
+func jobPolicySummary(policy task.JobPolicy) string {
+	switch policy {
+	case task.JobParallel:
+		return "parallel jobs"
+	case task.JobCancelPrevious:
+		return "cancel previous job"
+	default:
+		return "sequential jobs"
+	}
+}
+
+func (m model) taskActivity(taskID string) string {
+	running := m.running[taskID]
+	queued := m.queued[taskID]
+	switch {
+	case running > 0 && queued > 0:
+		return fmt.Sprintf("  [running %d, queued %d]", running, queued)
+	case running > 0:
+		return fmt.Sprintf("  [running %d]", running)
+	case queued > 0:
+		return fmt.Sprintf("  [queued %d]", queued)
+	case m.latest[taskID] == daemon.StatusSucceeded:
+		return "  [succeeded]"
+	case m.latest[taskID] == daemon.StatusFailed:
+		return "  [failed]"
+	case m.latest[taskID] == daemon.StatusCanceled:
+		return "  [canceled]"
+	default:
+		return ""
+	}
+}
+
+func (m model) jobsView() string {
+	var body strings.Builder
+	body.WriteString(m.workspaceHeader(screenJobs))
+	body.WriteString(m.gap())
+	if len(m.jobs) == 0 {
+		body.WriteString(mutedStyle.Render("No jobs yet."))
+	} else {
+		start, end := visibleRange(len(m.jobs), m.jobCursor, max(1, m.contentHeight()-10))
+		for i := start; i < end; i++ {
+			job := m.jobs[len(m.jobs)-1-i]
+			line := fmt.Sprintf("%-9s %s  %s", strings.ToUpper(string(job.Status)), job.Name, shortJobID(job.ID))
+			if i == m.jobCursor {
+				line = selectedStyle.Render("› " + line)
+			} else {
+				line = "  " + line
+			}
+			body.WriteString(line)
+			body.WriteByte('\n')
+			if i == m.jobCursor {
+				body.WriteString("  ")
+				body.WriteString(mutedStyle.Render(fmt.Sprintf(
+					"%s • %d bytes output • %s",
+					job.CreatedAt.Local().Format("2006-01-02 15:04:05"),
+					job.OutputSize,
+					job.Command,
+				)))
+				body.WriteByte('\n')
+			}
+		}
+	}
+	body.WriteString(m.gap())
+	body.WriteString(mutedStyle.Render("tab switch • enter log • c cancel • r rerun • d delete output • q quit"))
+	body.WriteString(m.statusView())
+	return m.renderPanel(body.String())
+}
+
+func shortJobID(id string) string {
+	if len(id) <= 8 {
+		return id
+	}
+	return id[len(id)-8:]
 }
 
 func visibleRange(total, current, limit int) (int, int) {
@@ -1077,7 +1649,7 @@ func (m model) taskFormView() string {
 		title = "EDIT TASK"
 	}
 
-	if m.contentHeight() < 9 {
+	if m.contentHeight() < 15 {
 		return m.compactTaskFormView(title)
 	}
 
@@ -1094,16 +1666,20 @@ func (m model) taskFormView() string {
 	body.WriteString("\n")
 	body.WriteString(mutedStyle.Render("Use {{field_key}} where a runtime value belongs."))
 	body.WriteString(m.gap())
-	body.WriteString(taskStepTitle("Fields", m.taskFocus == 2))
+	body.WriteString(taskStepTitle("Job policy", m.taskFocus == 2))
+	body.WriteByte('\n')
+	body.WriteString(m.pickerRow(jobPolicyLabels, jobPolicyIndex(m.formJobPolicy)))
+	body.WriteString(m.gap())
+	body.WriteString(taskStepTitle("Fields", m.taskFocus == 3))
 	body.WriteByte('\n')
 	if len(m.formFields) == 0 {
 		empty := mutedStyle.Render("No fields. Press a or enter to add one.")
-		if m.taskFocus == 2 {
+		if m.taskFocus == 3 {
 			empty = selectedStyle.Render("› No fields. Press a or enter to add one.")
 		}
 		body.WriteString(empty)
 	} else {
-		start, end := visibleRange(len(m.formFields), m.fieldCursor, max(1, m.contentHeight()-12))
+		start, end := visibleRange(len(m.formFields), m.fieldCursor, max(1, m.contentHeight()-15))
 		if start > 0 {
 			body.WriteString(mutedStyle.Render(fmt.Sprintf("↑ %d more", start)))
 			body.WriteByte('\n')
@@ -1119,7 +1695,7 @@ func (m model) taskFormView() string {
 				requirement = "optional"
 			}
 			line := fmt.Sprintf("  %d. %s (%s, %s, %s → {{%s}})", i+1, field.Label, field.Type, requirement, mode, field.Key)
-			if m.taskFocus == 2 && i == m.fieldCursor {
+			if m.taskFocus == 3 && i == m.fieldCursor {
 				line = selectedStyle.Render("› " + strings.TrimSpace(line))
 			}
 			body.WriteString(line)
@@ -1131,7 +1707,7 @@ func (m model) taskFormView() string {
 		}
 	}
 	body.WriteString(m.gap())
-	body.WriteString(mutedStyle.Render("↑/↓ select • [/] reorder • a add • e edit • d delete • f2 save • esc cancel"))
+	body.WriteString(mutedStyle.Render("tab section • ←/→ policy • [/] reorder • a add • e edit • d delete • f2 save • esc cancel"))
 	body.WriteString(m.statusView())
 	return m.renderPanel(body.String())
 }
@@ -1151,6 +1727,10 @@ func (m model) compactTaskFormView(title string) string {
 		body.WriteByte('\n')
 		body.WriteString(m.taskInputs[1].View())
 	case 2:
+		body.WriteString(taskStepTitle("Job policy", true))
+		body.WriteByte('\n')
+		body.WriteString(m.pickerRow(jobPolicyLabels, jobPolicyIndex(m.formJobPolicy)))
+	case 3:
 		body.WriteString(taskStepTitle("Fields", true))
 		body.WriteByte('\n')
 		if len(m.formFields) == 0 {
@@ -1178,7 +1758,7 @@ func (m model) compactTaskFormView(title string) string {
 	}
 
 	body.WriteString(m.gap())
-	body.WriteString(mutedStyle.Render("↑/↓ section • tab section • [/] reorder • f2 save • esc cancel"))
+	body.WriteString(mutedStyle.Render("tab section • ←/→ policy • [/] reorder • f2 save • esc cancel"))
 	body.WriteString(m.statusView())
 	return m.renderPanel(body.String())
 }
@@ -1356,6 +1936,45 @@ func (m model) runFormView() string {
 	return m.renderPanel(body.String())
 }
 
+func (m model) resultView() string {
+	var body strings.Builder
+	body.WriteString(accentStyle.Render("JOB LOG"))
+	body.WriteByte('\n')
+	status := strings.ToUpper(string(m.result.Status))
+	switch m.result.Status {
+	case daemon.StatusFailed:
+		body.WriteString(errorStyle.Render(status))
+	case daemon.StatusSucceeded:
+		body.WriteString(okStyle.Render(status))
+	case daemon.StatusCanceled:
+		body.WriteString(mutedStyle.Render(status))
+	default:
+		body.WriteString(stepStyle.Render(status))
+	}
+	body.WriteString("  ")
+	body.WriteString(m.result.Name)
+	if m.result.Error != "" {
+		body.WriteString(": ")
+		body.WriteString(m.result.Error)
+	}
+	if m.result.StorageError != "" {
+		body.WriteByte('\n')
+		body.WriteString(errorStyle.Render("Log persistence: " + m.result.StorageError))
+	}
+	if m.showResultCommand() {
+		body.WriteByte('\n')
+		body.WriteString(mutedStyle.Render("$ " + m.result.Command))
+	}
+	body.WriteString(m.gap())
+	body.WriteString(m.resultViewport.View())
+	body.WriteString(m.gap())
+	body.WriteString(mutedStyle.Render(fmt.Sprintf(
+		"esc back • c cancel • r rerun • d delete output • ↑/↓ scroll • pgup/pgdown page • home/end jump • %.0f%%",
+		m.resultViewport.ScrollPercent()*100,
+	)))
+	return m.renderPanel(body.String())
+}
+
 func (m model) statusView() string {
 	if m.status == "" {
 		return ""
@@ -1385,5 +2004,8 @@ func (m model) renderPanel(content string) string {
 			lines = append(lines[:height-2], mutedStyle.Render("…"), lines[len(lines)-1])
 		}
 	}
-	return panelStyle.Width(width + panelStyle.GetHorizontalPadding()).Render(strings.Join(lines, "\n"))
+	return panelStyle.
+		Width(width + panelStyle.GetHorizontalPadding()).
+		Height(height + panelStyle.GetVerticalPadding()).
+		Render(strings.Join(lines, "\n"))
 }

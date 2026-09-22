@@ -4,12 +4,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
+	"github.com/xarunoba/taskrunner/internal/daemon"
 	"github.com/xarunoba/taskrunner/internal/task"
 )
 
@@ -182,26 +182,38 @@ func contains(values []string, target string) bool {
 	return false
 }
 
-func executeTaskCLI(workspace string, item task.Task, values map[string]string, stdin io.Reader, stdout, stderr io.Writer) error {
+func executeTaskCLI(workspace string, item task.Task, values map[string]string, _ io.Reader, stdout, _ io.Writer) error {
 	command, err := item.Render(values)
 	if err != nil {
 		return err
 	}
-	shell := shellPath()
-	cmd := exec.Command(shell, "-c", command)
-	cmd.Dir = workspace
-	cmd.Stdin = stdin
-	cmd.Stdout = stdout
-	cmd.Stderr = stderr
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("run task %q: %w", item.Name, err)
+	client := daemon.NewClient(workspace)
+	job, err := client.Start(item.File, item.Name, command, item.JobPolicy)
+	if err != nil {
+		return fmt.Errorf("start task %q: %w", item.Name, err)
 	}
-	return nil
-}
 
-func shellPath() string {
-	if shell := strings.TrimSpace(os.Getenv("SHELL")); shell != "" {
-		return shell
+	outputOffset := 0
+	for {
+		current, err := client.Job(job.ID, outputOffset)
+		if err != nil {
+			return fmt.Errorf("follow task %q: %w", item.Name, err)
+		}
+		if current.Output != "" {
+			if _, err := io.WriteString(stdout, current.Output); err != nil {
+				return fmt.Errorf("write task %q output: %w", item.Name, err)
+			}
+		}
+		outputOffset = current.OutputSize
+		if current.Done() {
+			if current.StorageError != "" {
+				return fmt.Errorf("save job history for task %q: %s", item.Name, current.StorageError)
+			}
+			if current.Status != daemon.StatusSucceeded {
+				return fmt.Errorf("run task %q: %s", item.Name, current.Error)
+			}
+			return nil
+		}
+		time.Sleep(50 * time.Millisecond)
 	}
-	return "/bin/sh"
 }

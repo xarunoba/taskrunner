@@ -7,6 +7,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/xarunoba/taskrunner/internal/daemon"
 	"github.com/xarunoba/taskrunner/internal/task"
 )
 
@@ -18,6 +19,10 @@ func main() {
 }
 
 func run(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
+	if len(args) == 2 && args[0] == "__daemon" {
+		return daemon.Serve(args[1], daemon.DefaultIdleTimeout)
+	}
+
 	options, err := parseCLI(args)
 	if err != nil {
 		return err

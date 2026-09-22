@@ -2,9 +2,13 @@ package main
 
 import (
 	"bytes"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/xarunoba/taskrunner/internal/daemon"
 	"github.com/xarunoba/taskrunner/internal/task"
 )
 
@@ -98,8 +102,26 @@ func TestPrepareTaskValuesRejectsMissingRequiredField(t *testing.T) {
 func TestExecuteTaskCLIUsesPreparedValues(t *testing.T) {
 	t.Parallel()
 
+	workspace := t.TempDir()
+	serverErr := make(chan error, 1)
+	go func() {
+		serverErr <- daemon.Serve(workspace, 100*time.Millisecond)
+	}()
+	socket := filepath.Join(workspace, ".taskrunner", "daemon.sock")
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		if _, err := os.Stat(socket); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("daemon socket was not created")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
 	item := task.Task{
 		Name:    "Print",
+		File:    "print.json",
 		Command: `printf '%s|%s|%s' {{message}} {{note}} {{confirmed}}`,
 		Fields: []task.Field{
 			{Key: "message", Label: "Message", Type: task.FieldText},
@@ -113,10 +135,19 @@ func TestExecuteTaskCLIUsesPreparedValues(t *testing.T) {
 	}
 
 	var output bytes.Buffer
-	if err := executeTaskCLI(t.TempDir(), item, values, strings.NewReader(""), &output, &output); err != nil {
+	if err := executeTaskCLI(workspace, item, values, strings.NewReader(""), &output, &output); err != nil {
 		t.Fatalf("executeTaskCLI() error = %v", err)
 	}
 	if got, want := output.String(), "hello world||false"; got != want {
 		t.Fatalf("output = %q, want %q", got, want)
+	}
+
+	select {
+	case err := <-serverErr:
+		if err != nil {
+			t.Fatalf("daemon.Serve() error = %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("daemon did not stop after becoming idle")
 	}
 }

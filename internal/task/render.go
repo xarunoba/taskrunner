@@ -15,6 +15,12 @@ func (t Task) Validate() error {
 		return errors.New("name and command are required")
 	}
 
+	switch t.JobPolicy {
+	case JobSequential, JobParallel, JobCancelPrevious:
+	default:
+		return fmt.Errorf("unknown job policy %q", t.JobPolicy)
+	}
+
 	keys := make(map[string]struct{}, len(t.Fields))
 	for i, field := range t.Fields {
 		if !fieldKeyPattern.MatchString(field.Key) {

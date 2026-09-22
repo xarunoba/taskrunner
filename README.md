@@ -34,14 +34,15 @@ The current working directory is the workspace.
 
 ## TUI
 
-Run `taskrunner` without arguments to open the task list.
+Run `taskrunner` without arguments to open the **Tasks** tab.
 
-### Task list
+### Tasks
 
 | Input | Action |
 | --- | --- |
 | `↑` / `↓` or `k` / `j` | Select a task |
 | `Enter` | Run the selected task |
+| `Tab` / `Shift+Tab` | Switch between the **Tasks** and **Jobs** tabs |
 | `n` | Create a task |
 | `e` | Edit the selected task |
 | `d` | Delete the selected task |
@@ -53,8 +54,9 @@ Run `taskrunner` without arguments to open the task list.
 
 | Input | Action |
 | --- | --- |
-| `↑` / `↓` | Move between the name, command, and field list |
+| `↑` / `↓` | Move between the name, command, job policy, and field list |
 | `Tab` / `Shift+Tab` | Move forward or backward between sections |
+| `←` / `→` or `h` / `l` | Select a job policy while that section is active |
 | `a` | Add a field |
 | `e` or `Enter` | Edit the selected field |
 | `d` | Delete the selected field |
@@ -85,6 +87,43 @@ Taskrunner replaces placeholders with collected values. A placeholder without a 
 Moving backward preserves values already entered. Optional text fields accept an empty value, optional choices include a **Skip** entry, and optional confirmations use `false` when **No** is selected.
 
 Taskrunner records non-empty text values when a task starts. Runtime history is separate from task creation and editing. History is stored per task and field under `.taskrunner/history/`; each field keeps its 100 newest unique values.
+
+### Jobs and logs
+
+Taskrunner starts a workspace daemon on demand. The daemon owns TUI and CLI jobs, so a job continues after the TUI closes. It exits after 10 seconds with no clients and no queued or running jobs.
+
+Different tasks can run concurrently. Each task has one of three job policies:
+
+- **Sequential** queues a new job until older jobs for the same task finish. This is the default.
+- **Parallel** starts every job immediately.
+- **Cancel previous** cancels queued and running older jobs for the same task, then starts the new job.
+
+The **Tasks** tab marks running and queued jobs. When a task is idle, it shows the latest job as **succeeded**, **failed**, or **canceled**. The **Jobs** tab lists every job with its status, command, timestamps, and combined standard output and standard error log.
+
+| Input | Action |
+| --- | --- |
+| `↑` / `↓` or `k` / `j` | Select a job |
+| `Enter` | Open the selected job log |
+| `Tab` / `Shift+Tab` | Switch between the **Tasks** and **Jobs** tabs |
+| `c` | Cancel the selected queued or running job |
+| `r` | Rerun the selected job as a new job |
+| `d` | Delete output from the selected completed job |
+| `q` | Quit |
+| Mouse click | Select a job or control; click a selected job again to open its log |
+
+Running logs update live. The log viewport uses all available panel height. Completed logs remain available after the daemon exits and restarts.
+
+| Input | Action |
+| --- | --- |
+| `↑` / `↓` or `k` / `j` | Scroll one line |
+| `Page Up` / `Page Down` | Scroll one page |
+| `Home` or `g` | Jump to the top |
+| `End` or `G` | Jump to the bottom |
+| `c` | Cancel this queued or running job |
+| `r` | Rerun this job as a new job |
+| `d` | Delete output from this completed job |
+| `Esc` | Return to the **Jobs** tab |
+| Mouse wheel | Scroll the log |
 
 ## CLI
 
@@ -127,6 +166,8 @@ Direct runs require every required field:
 - Choice values must match a configured option.
 - Unknown field keys are rejected.
 
+CLI runs also use the workspace daemon. The command waits for its job and writes the combined standard output and standard error log directly to the terminal.
+
 Quote `key=value` when the value contains whitespace or shell characters:
 
 ```sh
@@ -147,6 +188,7 @@ Example:
 {
   "name": "Deploy",
   "command": "deploy --environment {{environment}} --version {{version}}",
+  "job_policy": "parallel",
   "fields": [
     {
       "key": "environment",
@@ -171,7 +213,7 @@ Example:
 }
 ```
 
-Fields are evaluated in JSON order. Tasks without fields run immediately.
+Fields are evaluated in JSON order. Tasks without fields run immediately. `job_policy` is optional and accepts `"parallel"` or `"cancel_previous"`; omission means sequential.
 
 ### Field properties
 
@@ -207,8 +249,11 @@ Raw values execute as shell syntax. Use raw mode only with trusted task files an
 | --- | --- |
 | `.taskrunner/tasks/` | Task definitions |
 | `.taskrunner/history/` | Runtime text-field history |
+| `.taskrunner/runs/` | One persisted JSON record and log per job |
+| `.taskrunner/daemon.sock` | Active daemon IPC socket |
+| `.taskrunner/daemon.lock` | Workspace daemon lock |
 
-Taskrunner generates task filenames and rejects paths outside `.taskrunner/tasks/`. It writes task and history files through temporary files and atomic renames. History files use owner-only permissions.
+Taskrunner generates task filenames and rejects paths outside `.taskrunner/tasks/`. It writes task, value-history, and job files through temporary files and atomic renames. History and job files use owner-only permissions.
 
 To share a task, copy its JSON file from `.taskrunner/tasks/` into the same directory in another workspace. Taskrunner validates every task when loading it and reports the filename of malformed input.
 
