@@ -36,6 +36,14 @@ func (j Job) Done() bool {
 	return j.Status == StatusSucceeded || j.Status == StatusFailed || j.Status == StatusCanceled
 }
 
+// ShortID returns the final eight characters of the job ID for display.
+func (j Job) ShortID() string {
+	if len(j.ID) <= 8 {
+		return j.ID
+	}
+	return j.ID[len(j.ID)-8:]
+}
+
 type request struct {
 	Action       string         `json:"action"`
 	TaskID       string         `json:"task_id,omitempty"`

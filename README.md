@@ -127,6 +127,8 @@ Running logs update live. The log viewport uses all available panel height. Comp
 
 ## CLI
 
+The CLI uses Cobra for command parsing, contextual help, argument validation, and shell completion.
+
 ```text
 taskrunner
 taskrunner create
@@ -245,7 +247,7 @@ Job arguments accept the full ID or a unique ID prefix or suffix. The short ID p
 
 ### Shell completion
 
-Generate completion source for Bash, Zsh, or Fish:
+Generate a Cobra completion script for Bash, Zsh, or Fish. Each script includes the current commands and flags:
 
 ```sh
 taskrunner completion bash
@@ -344,6 +346,8 @@ go test ./...
 go vet ./...
 go build ./...
 ```
+
+The executable entry point stays in `main.go`. `internal/cli` owns the Cobra command tree and non-TUI command execution. `internal/tui` owns Bubble Tea interaction and rendering. `internal/task` owns task data and persistence, while `internal/daemon` owns background job execution and history.
 
 Run TUI changes in a PTY. Check narrow and short terminals as well as wide and tall terminals.
 

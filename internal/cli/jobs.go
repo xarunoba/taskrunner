@@ -1,6 +1,7 @@
-package main
+package cli
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"path/filepath"
@@ -11,7 +12,7 @@ import (
 	"github.com/xarunoba/taskrunner/internal/daemon"
 )
 
-func executeJobsCLI(workspace string, options cliOptions, stdout io.Writer) error {
+func executeJobsCLI(workspace string, options jobListOptions, stdout io.Writer) error {
 	jobs, err := daemon.NewClient(workspace).Jobs()
 	if err != nil {
 		return fmt.Errorf("list jobs: %w", err)
@@ -38,7 +39,7 @@ func executeJobsCLI(workspace string, options cliOptions, stdout io.Writer) erro
 		if _, err := fmt.Fprintf(
 			table,
 			"%s\t%s\t%s\t%s\t%s\n",
-			shortJobID(job.ID),
+			job.ShortID(),
 			job.Name,
 			job.Status,
 			job.CreatedAt.Local().Format("2006-01-02 15:04:05"),
@@ -53,7 +54,7 @@ func executeJobsCLI(workspace string, options cliOptions, stdout io.Writer) erro
 	return nil
 }
 
-func filterJobs(jobs []daemon.Job, options cliOptions) []daemon.Job {
+func filterJobs(jobs []daemon.Job, options jobListOptions) []daemon.Job {
 	filtered := make([]daemon.Job, 0, len(jobs))
 	for i := len(jobs) - 1; i >= 0; i-- {
 		job := jobs[i]
@@ -80,51 +81,63 @@ func jobMatchesTask(job daemon.Job, value string) bool {
 	return strings.EqualFold(job.Name, value) || strings.EqualFold(job.TaskID, value) || strings.EqualFold(fileName, value)
 }
 
-func executeJobCLI(workspace string, options cliOptions, stdin io.Reader, stdout, stderr io.Writer) error {
-	client := daemon.NewClient(workspace)
-	if options.mode == modeJobPrune {
-		return executeJobPruneCLI(client, options, stdin, stdout, stderr)
-	}
-
-	jobs, err := client.Jobs()
+func executeJobLogsByReference(workspace, reference string, options jobLogsOptions, stdout io.Writer) error {
+	client, job, err := loadJobByReference(workspace, reference)
 	if err != nil {
-		return fmt.Errorf("list jobs: %w", err)
+		return err
 	}
-	job, err := findJob(jobs, options.job)
+	return executeJobLogsCLI(client, job, options, stdout)
+}
+
+func executeJobByReference(workspace, reference string, action jobAction, jsonOutput bool, stdout io.Writer) error {
+	client, job, err := loadJobByReference(workspace, reference)
 	if err != nil {
 		return err
 	}
 
-	switch options.mode {
-	case modeJobLogs:
-		return executeJobLogsCLI(client, job, options, stdout)
-	case modeJobWait:
+	switch action {
+	case jobWait:
 		return executeJobWaitCLI(client, job, stdout)
-	case modeJobInspect:
-		return executeJobInspectCLI(job, options.json, stdout)
-	case modeJobCancel:
+	case jobInspect:
+		return executeJobInspectCLI(job, jsonOutput, stdout)
+	case jobCancel:
 		job, err = client.Cancel(job.ID)
 		if err == nil {
 			_, err = fmt.Fprintf(stdout, "%s\t%s\tcancel requested\n", job.ID, job.Name)
 		}
-	case modeJobRerun:
+	case jobRerun:
 		job, err = client.Rerun(job.ID)
 		if err == nil {
 			_, err = fmt.Fprintf(stdout, "%s\t%s\t%s\n", job.ID, job.Name, job.Status)
 		}
-	case modeJobRemove:
+	case jobRemove:
 		job, err = client.Remove(job.ID)
 		if err == nil {
 			_, err = fmt.Fprintf(stdout, "%s\t%s\tremoved\n", job.ID, job.Name)
 		}
+	default:
+		return errors.New("unknown job action")
 	}
 	if err != nil {
-		return fmt.Errorf("%s job %q: %w", jobOperation(options.mode), options.job, err)
+		return fmt.Errorf("%s job %q: %w", jobActionName(action), reference, err)
 	}
 	return nil
 }
 
-func executeJobLogsCLI(client *daemon.Client, job daemon.Job, options cliOptions, stdout io.Writer) error {
+func loadJobByReference(workspace, reference string) (*daemon.Client, daemon.Job, error) {
+	client := daemon.NewClient(workspace)
+	jobs, err := client.Jobs()
+	if err != nil {
+		return nil, daemon.Job{}, fmt.Errorf("list jobs: %w", err)
+	}
+	job, err := findJob(jobs, reference)
+	if err != nil {
+		return nil, daemon.Job{}, err
+	}
+	return client, job, nil
+}
+
+func executeJobLogsCLI(client *daemon.Client, job daemon.Job, options jobLogsOptions, stdout io.Writer) error {
 	current, err := client.Job(job.ID, 0)
 	if err != nil {
 		return fmt.Errorf("read job %q: %w", job.ID, err)
@@ -227,7 +240,7 @@ func formatJobTime(value time.Time) string {
 	return value.Local().Format(time.RFC3339)
 }
 
-func executeJobPruneCLI(client *daemon.Client, options cliOptions, stdin io.Reader, stdout, stderr io.Writer) error {
+func executeJobPruneCLI(client *daemon.Client, options jobPruneOptions, stdin io.Reader, stdout, stderr io.Writer) error {
 	jobs, err := client.Jobs()
 	if err != nil {
 		return fmt.Errorf("list jobs: %w", err)
@@ -287,19 +300,17 @@ func jobResultError(job daemon.Job) error {
 	return fmt.Errorf("job %s", job.Status)
 }
 
-func jobOperation(mode cliMode) string {
-	switch mode {
-	case modeJobLogs:
-		return "read"
-	case modeJobWait:
+func jobActionName(action jobAction) string {
+	switch action {
+	case jobWait:
 		return "wait for"
-	case modeJobInspect:
+	case jobInspect:
 		return "inspect"
-	case modeJobCancel:
+	case jobCancel:
 		return "cancel"
-	case modeJobRerun:
+	case jobRerun:
 		return "rerun"
-	case modeJobRemove:
+	case jobRemove:
 		return "remove"
 	default:
 		return "manage"

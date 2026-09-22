@@ -1,4 +1,4 @@
-package main
+package tui
 
 import (
 	"fmt"
@@ -464,7 +464,7 @@ func (m model) clickJobs(line string, x int) (tea.Model, tea.Cmd) {
 	}
 	for i := range m.jobs {
 		job := m.jobs[len(m.jobs)-1-i]
-		if !strings.Contains(line, shortJobID(job.ID)) {
+		if !strings.Contains(line, job.ShortID()) {
 			continue
 		}
 		if m.jobCursor == i {
@@ -1409,9 +1409,9 @@ func (m *model) applyJobAction(msg jobActionMsg) {
 				m.result = msg.job
 				m.setResultContent()
 			}
-			m.setStatus(fmt.Sprintf("Deleted output for %s %s", msg.job.Name, shortJobID(msg.job.ID)))
+			m.setStatus(fmt.Sprintf("Deleted output for %s %s", msg.job.Name, msg.job.ShortID()))
 		} else {
-			m.setStatus(fmt.Sprintf("Cancel requested for %s %s", msg.job.Name, shortJobID(msg.job.ID)))
+			m.setStatus(fmt.Sprintf("Cancel requested for %s %s", msg.job.Name, msg.job.ShortID()))
 		}
 	}
 }
@@ -1662,7 +1662,7 @@ func (m model) jobsView() string {
 		start, end := visibleRange(len(m.jobs), m.jobCursor, max(1, m.contentHeight()-4))
 		for i := start; i < end; i++ {
 			job := m.jobs[len(m.jobs)-1-i]
-			line := fmt.Sprintf("%-9s %s  %s", strings.ToUpper(string(job.Status)), job.Name, shortJobID(job.ID))
+			line := fmt.Sprintf("%-9s %s  %s", strings.ToUpper(string(job.Status)), job.Name, job.ShortID())
 			if i == m.jobCursor {
 				line = selectedStyle.Render("› " + line)
 			} else {
@@ -1688,13 +1688,6 @@ func (m model) jobsView() string {
 		screenJobs,
 		"tab switch • enter log • c cancel • r rerun • d delete output • q quit",
 	)
-}
-
-func shortJobID(id string) string {
-	if len(id) <= 8 {
-		return id
-	}
-	return id[len(id)-8:]
 }
 
 func visibleRange(total, current, limit int) (int, int) {

@@ -1,4 +1,4 @@
-package main
+package cli
 
 import (
 	"bytes"
@@ -12,63 +12,42 @@ import (
 	"github.com/xarunoba/taskrunner/internal/task"
 )
 
-func TestParseRunCLIWithPreseededFields(t *testing.T) {
-	t.Parallel()
+func TestRunCommandWithPreseededFields(t *testing.T) {
+	workspace := t.TempDir()
+	store := task.NewStore(workspace)
+	if _, err := store.Save(task.Task{
+		Name:    "Deploy",
+		Command: "deploy {{environment}} {{note}}",
+		Fields: []task.Field{
+			{Key: "environment", Label: "Environment", Type: task.FieldText},
+			{Key: "note", Label: "Note", Type: task.FieldText},
+		},
+	}, ""); err != nil {
+		t.Fatalf("save task: %v", err)
+	}
+	t.Chdir(workspace)
 
-	options, err := parseCLI([]string{
+	var stdout, stderr bytes.Buffer
+	err := Execute([]string{
 		"run",
 		"Deploy",
+		"--dry-run",
+		"--quiet",
 		"--set",
 		"environment=staging",
 		"--set=note=release candidate",
-	})
+	},
+		strings.NewReader(""),
+		&stdout,
+		&stderr)
 	if err != nil {
-		t.Fatalf("parseCLI() error = %v", err)
+		t.Fatalf("run() error = %v", err)
 	}
-	if options.mode != modeRun || options.task != "Deploy" {
-		t.Fatalf("parseCLI() mode=%d task=%q", options.mode, options.task)
+	if got, want := stdout.String(), "deploy 'staging' 'release candidate'\n"; got != want {
+		t.Fatalf("output = %q, want %q", got, want)
 	}
-	if got := options.values["environment"]; got != "staging" {
-		t.Fatalf("environment = %q, want staging", got)
-	}
-	if got := options.values["note"]; got != "release candidate" {
-		t.Fatalf("note = %q, want release candidate", got)
-	}
-}
-
-func TestParseJobCommands(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		args []string
-		mode cliMode
-		job  string
-		all  bool
-	}{
-		{args: []string{"jobs"}, mode: modeJobs},
-		{args: []string{"jobs", "--all"}, mode: modeJobs, all: true},
-		{args: []string{"job", "logs", "abc123"}, mode: modeJobLogs, job: "abc123"},
-		{args: []string{"job", "cancel", "abc123"}, mode: modeJobCancel, job: "abc123"},
-		{args: []string{"job", "rerun", "abc123"}, mode: modeJobRerun, job: "abc123"},
-		{args: []string{"job", "rm", "abc123"}, mode: modeJobRemove, job: "abc123"},
-	}
-	for _, test := range tests {
-		options, err := parseCLI(test.args)
-		if err != nil {
-			t.Fatalf("parseCLI(%q) error = %v", test.args, err)
-		}
-		if options.mode != test.mode || options.job != test.job || options.all != test.all {
-			t.Fatalf(
-				"parseCLI(%q) = mode %d, job %q, all %t; want mode %d, job %q, all %t",
-				test.args,
-				options.mode,
-				options.job,
-				options.all,
-				test.mode,
-				test.job,
-				test.all,
-			)
-		}
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q, want empty", stderr.String())
 	}
 }
 
@@ -171,7 +150,7 @@ func TestExecuteTaskCLIUsesPreparedValues(t *testing.T) {
 	}
 
 	var output bytes.Buffer
-	if err := executeTaskCLI(workspace, item, values, cliOptions{}, &output, &output); err != nil {
+	if err := executeTaskCLI(workspace, item, values, taskRunOptions{}, &output, &output); err != nil {
 		t.Fatalf("executeTaskCLI() error = %v", err)
 	}
 	if got, want := output.String(), "hello world||false"; got != want {
@@ -206,41 +185,41 @@ func TestJobCLIListsActiveJobsAndManagesHistory(t *testing.T) {
 	}
 
 	var output bytes.Buffer
-	if err := executeJobsCLI(workspace, cliOptions{}, &output); err != nil {
+	if err := executeJobsCLI(workspace, jobListOptions{}, &output); err != nil {
 		t.Fatalf("executeJobsCLI(active) error = %v", err)
 	}
-	if !strings.Contains(output.String(), shortJobID(active.ID)) {
-		t.Fatalf("active jobs output does not contain %q:\n%s", shortJobID(active.ID), output.String())
+	if !strings.Contains(output.String(), active.ShortID()) {
+		t.Fatalf("active jobs output does not contain %q:\n%s", active.ShortID(), output.String())
 	}
-	if strings.Contains(output.String(), shortJobID(completed.ID)) {
-		t.Fatalf("active jobs output contains completed job %q:\n%s", shortJobID(completed.ID), output.String())
+	if strings.Contains(output.String(), completed.ShortID()) {
+		t.Fatalf("active jobs output contains completed job %q:\n%s", completed.ShortID(), output.String())
 	}
 
 	output.Reset()
-	if err := executeJobsCLI(workspace, cliOptions{all: true}, &output); err != nil {
+	if err := executeJobsCLI(workspace, jobListOptions{all: true}, &output); err != nil {
 		t.Fatalf("executeJobsCLI(all) error = %v", err)
 	}
 	for _, job := range []daemon.Job{completed, active} {
-		if !strings.Contains(output.String(), shortJobID(job.ID)) {
-			t.Fatalf("all jobs output does not contain %q:\n%s", shortJobID(job.ID), output.String())
+		if !strings.Contains(output.String(), job.ShortID()) {
+			t.Fatalf("all jobs output does not contain %q:\n%s", job.ShortID(), output.String())
 		}
 	}
 
 	output.Reset()
-	if err := executeJobCLI(workspace, cliOptions{mode: modeJobLogs, job: shortJobID(completed.ID)}, strings.NewReader(""), &output, &output); err != nil {
-		t.Fatalf("executeJobCLI(logs) error = %v", err)
+	if err := executeJobLogsByReference(workspace, completed.ShortID(), jobLogsOptions{tail: -1}, &output); err != nil {
+		t.Fatalf("executeJobLogsByReference() error = %v", err)
 	}
 	if got, want := output.String(), "complete"; got != want {
 		t.Fatalf("job logs = %q, want %q", got, want)
 	}
-	if err := executeJobCLI(workspace, cliOptions{mode: modeJobRemove, job: shortJobID(completed.ID)}, strings.NewReader(""), &output, &output); err != nil {
-		t.Fatalf("executeJobCLI(rm) error = %v", err)
+	if err := executeJobByReference(workspace, completed.ShortID(), jobRemove, false, &output); err != nil {
+		t.Fatalf("executeJobByReference(remove) error = %v", err)
 	}
 	if _, err := client.Job(completed.ID, 0); err == nil {
 		t.Fatal("removed job remains available")
 	}
-	if err := executeJobCLI(workspace, cliOptions{mode: modeJobCancel, job: shortJobID(active.ID)}, strings.NewReader(""), &output, &output); err != nil {
-		t.Fatalf("executeJobCLI(cancel) error = %v", err)
+	if err := executeJobByReference(workspace, active.ShortID(), jobCancel, false, &output); err != nil {
+		t.Fatalf("executeJobByReference(cancel) error = %v", err)
 	}
 	waitForCLIJob(t, client, active.ID)
 
