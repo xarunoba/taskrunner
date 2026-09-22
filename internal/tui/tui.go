@@ -2395,8 +2395,7 @@ func (m model) runFormView() string {
 	return m.renderWorkspacePanel(body.String(), screenRun)
 }
 
-func (m model) resultView() string {
-	var body strings.Builder
+func (m model) resultHeader(now time.Time) string {
 	status := strings.ToUpper(string(m.result.Status))
 	style := jobQueuedStyle
 	switch m.result.Status {
@@ -2407,13 +2406,42 @@ func (m model) resultView() string {
 	case daemon.StatusCanceled:
 		style = jobCanceledStyle
 	}
-	body.WriteString(style.Render(status))
-	body.WriteString("  ")
-	body.WriteString(m.result.Name)
+
+	left := style.Render(status) + "  " + m.result.Name
 	if m.result.Error != "" {
-		body.WriteString(": ")
-		body.WriteString(m.result.Error)
+		left += ": " + m.result.Error
 	}
+
+	elapsed := formatJobElapsed(m.result, now)
+	if elapsed == "" {
+		return left
+	}
+	elapsed = mutedStyle.Render(elapsed)
+
+	width := m.contentWidth()
+	left = ansi.Truncate(left, max(0, width-ansi.StringWidth(elapsed)-1), "…")
+	spacer := strings.Repeat(" ", max(1, width-ansi.StringWidth(left)-ansi.StringWidth(elapsed)))
+	return left + spacer + elapsed
+}
+
+func formatJobElapsed(job daemon.Job, now time.Time) string {
+	if job.StartedAt.IsZero() {
+		return ""
+	}
+	end := job.EndedAt
+	if end.IsZero() {
+		end = now
+	}
+	elapsed := end.Sub(job.StartedAt)
+	if elapsed < 0 {
+		elapsed = 0
+	}
+	return elapsed.Round(time.Millisecond).String()
+}
+
+func (m model) resultView() string {
+	var body strings.Builder
+	body.WriteString(m.resultHeader(time.Now()))
 	if m.result.StorageError != "" {
 		body.WriteByte('\n')
 		body.WriteString(errorStyle.Render("Log persistence: " + m.result.StorageError))

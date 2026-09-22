@@ -115,7 +115,7 @@ The **Tasks** tab marks running and queued jobs. When a task is idle, it shows t
 | `q` | Quit |
 | Mouse click | Select a job or control; click a selected job again to open its log |
 
-Running logs update live. The log viewport uses all available panel height. Completed logs remain available after the daemon exits and restarts.
+Running logs update live. The log header shows elapsed execution time. The log viewport uses all available panel height. Completed logs remain available after the daemon exits and restarts.
 
 | Input | Action |
 | --- | --- |

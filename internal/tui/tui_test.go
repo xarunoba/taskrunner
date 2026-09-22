@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -205,6 +206,38 @@ func TestFailedTaskLogShowsFailureSummary(t *testing.T) {
 	}
 	if !strings.Contains(view, "failure details") {
 		t.Fatalf("result view does not contain command output:\n%s", view)
+	}
+}
+
+func TestTaskLogRightAlignsElapsedTime(t *testing.T) {
+	t.Parallel()
+
+	started := time.Date(2026, time.September, 23, 12, 0, 0, 0, time.UTC)
+	m := newModel(task.NewStore(t.TempDir()), nil)
+	m.resize(60, 16)
+	m.openResult(daemon.Job{
+		ID:        "run-timed",
+		Name:      "Timed task",
+		Status:    daemon.StatusSucceeded,
+		StartedAt: started,
+		EndedAt:   started.Add(1500 * time.Millisecond),
+	})
+
+	var header string
+	for _, line := range strings.Split(ansi.Strip(m.View()), "\n") {
+		if strings.Contains(line, "Timed task") {
+			header = line
+			break
+		}
+	}
+	if header == "" {
+		t.Fatalf("result view does not contain task title:\n%s", ansi.Strip(m.View()))
+	}
+	if !strings.Contains(header, "Timed task") || !strings.Contains(header, "1.5s") {
+		t.Fatalf("result header does not contain title and elapsed time: %q", header)
+	}
+	if !strings.HasSuffix(header, "1.5s  │") {
+		t.Fatalf("elapsed time is not aligned to the content's right edge: %q", header)
 	}
 }
 
