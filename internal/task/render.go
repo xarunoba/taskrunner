@@ -8,6 +8,7 @@ import (
 )
 
 var fieldKeyPattern = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_]*$`)
+var valuePlaceholderPattern = regexp.MustCompile(`\{\{[A-Za-z][A-Za-z0-9_]*\}\}`)
 
 func (t Task) Validate() error {
 	if strings.TrimSpace(t.Name) == "" || strings.TrimSpace(t.Command) == "" {
@@ -43,6 +44,19 @@ func (t Task) Validate() error {
 		}
 	}
 	return nil
+}
+
+// ResolveKnownValues replaces field placeholders that already have runtime values.
+// Unknown placeholders remain literal so labels and options can contain braces.
+func ResolveKnownValues(text string, values map[string]string) string {
+	return valuePlaceholderPattern.ReplaceAllStringFunc(text, func(placeholder string) string {
+		key := placeholder[2 : len(placeholder)-2]
+		value, ok := values[key]
+		if !ok {
+			return placeholder
+		}
+		return value
+	})
 }
 
 func (t Task) Render(values map[string]string) (string, error) {

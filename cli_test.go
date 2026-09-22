@@ -56,6 +56,29 @@ func TestPrepareTaskValuesAllowsOmittedOptionalFields(t *testing.T) {
 	}
 }
 
+func TestPrepareTaskValuesResolvesEarlierValuesInChoiceOptions(t *testing.T) {
+	t.Parallel()
+
+	item := task.Task{
+		Name:    "Deploy",
+		Command: "deploy {{target}}",
+		Fields: []task.Field{
+			{Key: "environment", Label: "Environment", Type: task.FieldText},
+			{Key: "target", Label: "Target", Type: task.FieldChoice, Options: []string{"{{environment}} primary"}},
+		},
+	}
+	values, err := prepareTaskValues(item, map[string]string{
+		"environment": "staging",
+		"target":      "staging primary",
+	})
+	if err != nil {
+		t.Fatalf("prepareTaskValues() error = %v", err)
+	}
+	if got := values["target"]; got != "staging primary" {
+		t.Fatalf("target = %q, want %q", got, "staging primary")
+	}
+}
+
 func TestPrepareTaskValuesRejectsMissingRequiredField(t *testing.T) {
 	t.Parallel()
 

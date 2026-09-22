@@ -97,6 +97,67 @@ func TestTaskFormArrowAndMouseNavigation(t *testing.T) {
 	}
 }
 
+func TestTaskFormF2SavesAndReordersFields(t *testing.T) {
+	t.Parallel()
+
+	store := task.NewStore(t.TempDir())
+	m := newModel(store, nil)
+	m.resize(80, 24)
+	m.openTaskForm(task.Task{})
+	m.taskInputs[0].SetValue("Ordered task")
+	m.taskInputs[1].SetValue("printf '%s %s' {{second}} {{first}}")
+	m.formFields = []task.Field{
+		{Key: "first", Label: "First", Type: task.FieldText},
+		{Key: "second", Label: "Second", Type: task.FieldText},
+	}
+	m.taskFocus = 2
+	m.fieldCursor = 1
+
+	updated, _ := m.updateTaskForm(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'['}})
+	m = updated.(model)
+	if m.fieldCursor != 0 || m.formFields[0].Key != "second" {
+		t.Fatalf("move earlier produced cursor=%d fields=%q,%q", m.fieldCursor, m.formFields[0].Key, m.formFields[1].Key)
+	}
+
+	updated, _ = m.updateTaskForm(tea.KeyMsg{Type: tea.KeyF2})
+	m = updated.(model)
+	if m.screen != screenList {
+		t.Fatalf("screen after F2 = %d, want list", m.screen)
+	}
+	items, err := store.Load()
+	if err != nil {
+		t.Fatalf("store.Load() error = %v", err)
+	}
+	if len(items) != 1 || items[0].Fields[0].Key != "second" {
+		t.Fatalf("saved fields = %#v, want second field first", items)
+	}
+}
+
+func TestRuntimeResolvesEarlierValuesInConfirmationLabel(t *testing.T) {
+	t.Parallel()
+
+	item := task.Task{
+		Name:    "Deploy",
+		Command: "deploy {{version}}",
+		Fields: []task.Field{
+			{Key: "version", Label: "Version", Type: task.FieldText},
+			{Key: "confirmed", Label: "Deploy {{version}} to {{environment}}?", Type: task.FieldConfirm},
+		},
+	}
+	m := newModel(task.NewStore(t.TempDir()), []task.Task{item})
+	m.resize(80, 24)
+	started, _ := m.startRun(item)
+	m = started.(model)
+	m.runInput.SetValue("1.4.0")
+
+	updated, _ := m.updateRunForm(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(model)
+	view := ansi.Strip(m.View())
+	if !strings.Contains(view, "Deploy 1.4.0 to {{environment}}?") {
+		t.Fatalf("confirmation view does not contain resolved label:\n%s", view)
+	}
+}
+
 func TestRuntimeCanReturnToEarlierInput(t *testing.T) {
 	t.Parallel()
 
@@ -121,7 +182,7 @@ func TestRuntimeCanReturnToEarlierInput(t *testing.T) {
 	}
 	m.runInput.SetValue("second value")
 
-	updated, _ = m.updateRunForm(tea.KeyMsg{Type: tea.KeyUp})
+	updated, _ = m.updateRunForm(tea.KeyMsg{Type: tea.KeyShiftTab})
 	m = updated.(model)
 	if m.runIndex != 0 {
 		t.Fatalf("run index after back = %d, want 0", m.runIndex)
@@ -131,6 +192,56 @@ func TestRuntimeCanReturnToEarlierInput(t *testing.T) {
 	}
 	if got := m.runValues["second"]; got != "second value" {
 		t.Fatalf("preserved second input = %q, want %q", got, "second value")
+	}
+}
+
+func TestRuntimeTextHistoryUsesArrowKeys(t *testing.T) {
+	t.Parallel()
+
+	store := task.NewStore(t.TempDir())
+	item := task.Task{
+		Name:    "Release",
+		Command: "true",
+		File:    "release.json",
+		Fields: []task.Field{
+			{Key: "version", Label: "Version", Type: task.FieldText},
+		},
+	}
+	for _, version := range []string{"1.0.0", "1.1.0"} {
+		if err := store.RecordValueHistory(item, map[string]string{"version": version}); err != nil {
+			t.Fatalf("RecordValueHistory() error = %v", err)
+		}
+	}
+
+	m := newModel(store, []task.Task{item})
+	m.resize(80, 24)
+	started, _ := m.startRun(item)
+	m = started.(model)
+	m.runInput.SetValue("draft")
+
+	for _, want := range []string{"1.1.0", "1.0.0", "1.0.0"} {
+		updated, _ := m.updateRunForm(tea.KeyMsg{Type: tea.KeyUp})
+		m = updated.(model)
+		if got := m.runInput.Value(); got != want {
+			t.Fatalf("up history value = %q, want %q", got, want)
+		}
+	}
+	for _, want := range []string{"1.1.0", "draft", "draft"} {
+		updated, _ := m.updateRunForm(tea.KeyMsg{Type: tea.KeyDown})
+		m = updated.(model)
+		if got := m.runInput.Value(); got != want {
+			t.Fatalf("down history value = %q, want %q", got, want)
+		}
+	}
+
+	updated, _ := m.updateRunForm(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(model)
+	history, err := store.ValueHistory(item.File, "version")
+	if err != nil {
+		t.Fatalf("ValueHistory() error = %v", err)
+	}
+	if len(history) == 0 || history[0] != "draft" {
+		t.Fatalf("recorded history = %#v, want draft first", history)
 	}
 }
 

@@ -70,3 +70,15 @@ func TestRequiredFieldKeepsExistingJSONShape(t *testing.T) {
 		t.Fatalf("required field JSON unexpectedly contains optional flag: %s", data)
 	}
 }
+
+func TestResolveKnownValuesLeavesUnknownPlaceholdersLiteral(t *testing.T) {
+	t.Parallel()
+
+	got := ResolveKnownValues(
+		"Deploy {{version}} to {{environment}}?",
+		map[string]string{"version": "1.4.0"},
+	)
+	if want := "Deploy 1.4.0 to {{environment}}?"; got != want {
+		t.Fatalf("ResolveKnownValues() = %q, want %q", got, want)
+	}
+}

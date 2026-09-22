@@ -75,6 +75,9 @@ type model struct {
 	runIndex        int
 	runValues       map[string]string
 	runInput        textinput.Model
+	runHistory      []string
+	runHistoryIndex int
+	runHistoryDraft string
 	choiceCursor    int
 	confirmationYes bool
 	filePicker      filepicker.Model
@@ -324,7 +327,7 @@ func (m model) clickRunForm(line string, x int) (tea.Model, tea.Cmd) {
 			break
 		}
 		for i, option := range field.Options {
-			if strings.Contains(line, option) {
+			if strings.Contains(line, task.ResolveKnownValues(option, m.runValues)) {
 				m.choiceCursor = i
 				break
 			}
@@ -406,7 +409,7 @@ func (m model) updateTaskForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "esc":
 			m.closeTaskForm()
 			return m, nil
-		case "ctrl+s":
+		case "ctrl+s", "f2":
 			return m.saveTaskForm()
 		case "tab":
 			m.taskFocus = (m.taskFocus + 1) % 3
@@ -463,6 +466,16 @@ func (m model) updateTaskForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "e":
 				if len(m.formFields) > 0 {
 					m.openFieldForm(m.fieldCursor)
+				}
+			case "[":
+				if m.fieldCursor > 0 {
+					m.formFields[m.fieldCursor-1], m.formFields[m.fieldCursor] = m.formFields[m.fieldCursor], m.formFields[m.fieldCursor-1]
+					m.fieldCursor--
+				}
+			case "]":
+				if m.fieldCursor < len(m.formFields)-1 {
+					m.formFields[m.fieldCursor], m.formFields[m.fieldCursor+1] = m.formFields[m.fieldCursor+1], m.formFields[m.fieldCursor]
+					m.fieldCursor++
 				}
 			case "d":
 				if len(m.formFields) > 0 {
@@ -701,6 +714,7 @@ func (m model) startRun(item task.Task) (tea.Model, tea.Cmd) {
 	m.runTask = item
 	m.runIndex = 0
 	m.runValues = make(map[string]string, len(item.Fields))
+	m.runHistoryIndex = -1
 	m.status = ""
 	if len(item.Fields) == 0 {
 		return m.executeRun()
@@ -719,13 +733,24 @@ func (m *model) prepareRunField() tea.Cmd {
 
 	switch field.Type {
 	case task.FieldText:
-		m.runInput = newInput(field.Label, 1000)
-		m.runInput.SetValue(m.runValues[field.Key])
+		m.runHistory = nil
+		if m.runTask.File != "" {
+			history, err := m.store.ValueHistory(m.runTask.File, field.Key)
+			if err != nil {
+				m.setError(fmt.Errorf("load value history: %w", err))
+			} else {
+				m.runHistory = history
+			}
+		}
+		m.runHistoryIndex = -1
+		m.runHistoryDraft = m.runValues[field.Key]
+		m.runInput = newInput(task.ResolveKnownValues(field.Label, m.runValues), 1000)
+		m.runInput.SetValue(m.runHistoryDraft)
 		m.runInput.Width = m.contentWidth()
 		return m.runInput.Focus()
 	case task.FieldChoice:
 		for i, option := range field.Options {
-			if option == m.runValues[field.Key] {
+			if task.ResolveKnownValues(option, m.runValues) == m.runValues[field.Key] {
 				m.choiceCursor = i
 				break
 			}
@@ -753,24 +778,29 @@ func (m model) updateRunForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		case "shift+tab", "ctrl+left":
 			return m.previousRun()
-		case "up":
-			if m.runTask.Fields[m.runIndex].Type == task.FieldText {
-				return m.previousRun()
-			}
 		}
 	}
 
 	field := m.runTask.Fields[m.runIndex]
 	switch field.Type {
 	case task.FieldText:
-		if key, ok := msg.(tea.KeyMsg); ok && key.String() == "enter" {
-			value := strings.TrimSpace(m.runInput.Value())
-			if value == "" && !field.Optional {
-				m.setError(fmt.Errorf("%s is required", field.Label))
+		if key, ok := msg.(tea.KeyMsg); ok {
+			switch key.String() {
+			case "up":
+				m.moveRunHistory(-1)
 				return m, nil
+			case "down":
+				m.moveRunHistory(1)
+				return m, nil
+			case "enter":
+				value := strings.TrimSpace(m.runInput.Value())
+				if value == "" && !field.Optional {
+					m.setError(fmt.Errorf("%s is required", task.ResolveKnownValues(field.Label, m.runValues)))
+					return m, nil
+				}
+				m.runValues[field.Key] = value
+				return m.advanceRun()
 			}
-			m.runValues[field.Key] = value
-			return m.advanceRun()
 		}
 		var cmd tea.Cmd
 		m.runInput, cmd = m.runInput.Update(msg)
@@ -796,7 +826,7 @@ func (m model) updateRunForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "enter":
 			value := ""
 			if m.choiceCursor >= 0 {
-				value = field.Options[m.choiceCursor]
+				value = task.ResolveKnownValues(field.Options[m.choiceCursor], m.runValues)
 			}
 			m.runValues[field.Key] = value
 			return m.advanceRun()
@@ -846,6 +876,31 @@ func (m model) updateRunForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 }
 
+func (m *model) moveRunHistory(direction int) {
+	if len(m.runHistory) == 0 {
+		return
+	}
+	if direction < 0 {
+		if m.runHistoryIndex == -1 {
+			m.runHistoryDraft = m.runInput.Value()
+		}
+		if m.runHistoryIndex < len(m.runHistory)-1 {
+			m.runHistoryIndex++
+		}
+		m.runInput.SetValue(m.runHistory[m.runHistoryIndex])
+		return
+	}
+	if m.runHistoryIndex < 0 {
+		return
+	}
+	m.runHistoryIndex--
+	if m.runHistoryIndex == -1 {
+		m.runInput.SetValue(m.runHistoryDraft)
+		return
+	}
+	m.runInput.SetValue(m.runHistory[m.runHistoryIndex])
+}
+
 func (m model) advanceRun() (tea.Model, tea.Cmd) {
 	m.runIndex++
 	m.status = ""
@@ -870,7 +925,7 @@ func (m model) previousRun() (tea.Model, tea.Cmd) {
 	case task.FieldChoice:
 		value := ""
 		if m.choiceCursor >= 0 {
-			value = field.Options[m.choiceCursor]
+			value = task.ResolveKnownValues(field.Options[m.choiceCursor], m.runValues)
 		}
 		m.runValues[field.Key] = value
 	case task.FieldConfirm:
@@ -890,6 +945,12 @@ func (m model) executeRun() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	m.screen = screenList
+	if m.runTask.File != "" {
+		if err := m.store.RecordValueHistory(m.runTask, m.runValues); err != nil {
+			m.setError(fmt.Errorf("running %s; save value history: %w", m.runTask.Name, err))
+			return m, runCommand(m.store.Workspace(), m.runTask.Name, command)
+		}
+	}
 	m.setStatus(fmt.Sprintf("Running %s...", m.runTask.Name))
 	return m, runCommand(m.store.Workspace(), m.runTask.Name, command)
 }
@@ -1057,7 +1118,7 @@ func (m model) taskFormView() string {
 			if field.Optional {
 				requirement = "optional"
 			}
-			line := fmt.Sprintf("  %s (%s, %s, %s → {{%s}})", field.Label, field.Type, requirement, mode, field.Key)
+			line := fmt.Sprintf("  %d. %s (%s, %s, %s → {{%s}})", i+1, field.Label, field.Type, requirement, mode, field.Key)
 			if m.taskFocus == 2 && i == m.fieldCursor {
 				line = selectedStyle.Render("› " + strings.TrimSpace(line))
 			}
@@ -1070,7 +1131,7 @@ func (m model) taskFormView() string {
 		}
 	}
 	body.WriteString(m.gap())
-	body.WriteString(mutedStyle.Render("↑/↓ section • tab section • a add • e edit • d delete • ctrl+s save • esc cancel"))
+	body.WriteString(mutedStyle.Render("↑/↓ select • [/] reorder • a add • e edit • d delete • f2 save • esc cancel"))
 	body.WriteString(m.statusView())
 	return m.renderPanel(body.String())
 }
@@ -1106,7 +1167,8 @@ func (m model) compactTaskFormView(title string) string {
 			requirement = "optional"
 		}
 		body.WriteString(selectedStyle.Render(fmt.Sprintf(
-			"› %s (%s, %s, %s → {{%s}})",
+			"› %d. %s (%s, %s, %s → {{%s}})",
+			m.fieldCursor+1,
 			field.Label,
 			field.Type,
 			requirement,
@@ -1116,7 +1178,7 @@ func (m model) compactTaskFormView(title string) string {
 	}
 
 	body.WriteString(m.gap())
-	body.WriteString(mutedStyle.Render("↑/↓ section • tab section • ctrl+s save • esc cancel"))
+	body.WriteString(mutedStyle.Render("↑/↓ section • tab section • [/] reorder • f2 save • esc cancel"))
 	body.WriteString(m.statusView())
 	return m.renderPanel(body.String())
 }
@@ -1220,7 +1282,7 @@ func (m model) runFormView() string {
 	body.WriteString("\n")
 	body.WriteString(mutedStyle.Render(fmt.Sprintf("Field %d of %d", m.runIndex+1, len(m.runTask.Fields))))
 	body.WriteString(m.gap())
-	label := field.Label
+	label := task.ResolveKnownValues(field.Label, m.runValues)
 	if field.Optional {
 		label += " (optional)"
 	}
@@ -1235,9 +1297,9 @@ func (m model) runFormView() string {
 	case task.FieldText:
 		body.WriteString(m.runInput.View())
 		body.WriteString(m.gap())
-		help := "enter continue • ↑/shift+tab back • esc cancel"
+		help := "enter continue • ↑/↓ history • shift+tab back • esc cancel"
 		if field.Optional {
-			help = "enter skip/continue • ↑/shift+tab back • esc cancel"
+			help = "enter skip/continue • ↑/↓ history • shift+tab back • esc cancel"
 		}
 		body.WriteString(mutedStyle.Render(help))
 	case task.FieldChoice:
@@ -1255,9 +1317,10 @@ func (m model) runFormView() string {
 			body.WriteByte('\n')
 		}
 		for i := start; i < end; i++ {
-			option := "  " + field.Options[i]
+			resolved := task.ResolveKnownValues(field.Options[i], m.runValues)
+			option := "  " + resolved
 			if i == m.choiceCursor {
-				option = selectedStyle.Render("› " + field.Options[i])
+				option = selectedStyle.Render("› " + resolved)
 			}
 			body.WriteString(option)
 			body.WriteByte('\n')

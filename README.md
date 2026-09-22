@@ -1,44 +1,40 @@
 # Taskrunner
 
-Taskrunner is a workspace-local shell task runner with a responsive terminal UI and a direct CLI. Tasks are readable JSON files, so they can be reviewed, copied, and shared without a database or service.
+Taskrunner runs workspace-specific shell commands from a terminal UI or direct CLI commands. Each task is a readable JSON file under `.taskrunner/tasks/`.
 
-The TUI is built with [Bubble Tea](https://github.com/charmbracelet/bubbletea), [Bubbles](https://github.com/charmbracelet/bubbles), and [Lip Gloss](https://github.com/charmbracelet/lipgloss).
+The TUI uses [Bubble Tea](https://github.com/charmbracelet/bubbletea), [Bubbles](https://github.com/charmbracelet/bubbles), and [Lip Gloss](https://github.com/charmbracelet/lipgloss).
 
-## Features
+## Requirements
 
-- Workspace-local tasks stored under `.taskrunner/tasks/`
-- Text, choice, file, and confirmation fields
-- Required and optional fields
-- Safe shell argument interpolation by default
-- Explicit raw interpolation for trusted shell syntax
-- Keyboard and mouse navigation
-- Responsive layouts for narrow, wide, short, and tall terminals
-- Direct CLI commands for creating, editing, and running tasks
-- Repeatable `--set key=value` field pre-seeding
+- Go 1.27 or newer
 
-## Build
+Taskrunner executes commands through `$SHELL -c`. It uses `/bin/sh` when `$SHELL` is empty.
 
-Taskrunner requires Go 1.27 or newer.
+## Install
+
+Install from the current checkout:
+
+```sh
+go install .
+```
+
+Or build a binary in the repository:
 
 ```sh
 go build -o taskrunner .
 ```
 
-Run the binary from the workspace whose tasks you want to manage:
+Run Taskrunner from the workspace whose tasks you want to use:
 
 ```sh
-./taskrunner
+taskrunner
 ```
 
-Taskrunner treats its current working directory as the workspace.
+The current working directory is the workspace.
 
 ## TUI
 
-Start the task list:
-
-```sh
-./taskrunner
-```
+Run `taskrunner` without arguments to open the task list.
 
 ### Task list
 
@@ -51,85 +47,95 @@ Start the task list:
 | `d` | Delete the selected task |
 | `q` | Quit |
 | Mouse click | Select a task or control |
-| Mouse wheel | Move through the active component |
+| Mouse wheel | Move through the active control |
 
 ### Task editor
 
 | Input | Action |
 | --- | --- |
-| `↑` / `↓` | Move between Name, Command, and Fields |
+| `↑` / `↓` | Move between the name, command, and field list |
 | `Tab` / `Shift+Tab` | Move forward or backward between sections |
 | `a` | Add a field |
 | `e` or `Enter` | Edit the selected field |
 | `d` | Delete the selected field |
-| `Ctrl+S` | Save the task |
+| `[` / `]` | Move the selected field earlier or later |
+| `F2` or `Ctrl+S` | Save the task |
 | `Esc` | Cancel |
 
-Field configuration supports:
+Fields run in their displayed order. A field can be required or optional and can use safe argument interpolation or raw shell interpolation.
 
-- **Type:** text, choice, file, or confirmation
-- **Requirement:** required or optional
-- **Interpolation:** safely quoted argument or raw shell syntax
+Labels and choice options can reference values collected by earlier fields:
 
-### Runtime form
+```text
+Deploy {{version}} to {{environment}}?
+```
 
-- `Enter` accepts the current value.
-- `Shift+Tab` or `Ctrl+←` returns to the previous field.
-- `↑` returns from a text field to the previous field.
-- Previously entered values are preserved when moving backward.
-- Optional text fields can be skipped with an empty value.
-- Optional choices include a **Skip** entry.
-- Optional file fields can be skipped with `s`.
-- An optional confirmation continues with `false` when **No** is selected.
+Taskrunner replaces placeholders with collected values. A placeholder without a collected value remains unchanged.
+
+### Running a task
+
+| Input | Action |
+| --- | --- |
+| `Enter` | Accept the current value |
+| `↑` / `↓` | Browse previous values for the active text field |
+| `Shift+Tab` or `Ctrl+←` | Return to the previous field |
+| `s` | Skip an optional file field |
+| `Esc` | Cancel the run |
+
+Moving backward preserves values already entered. Optional text fields accept an empty value, optional choices include a **Skip** entry, and optional confirmations use `false` when **No** is selected.
+
+Taskrunner records non-empty text values when a task starts. Runtime history is separate from task creation and editing. History is stored per task and field under `.taskrunner/history/`; each field keeps its 100 newest unique values.
 
 ## CLI
+
+```text
+taskrunner
+taskrunner create
+taskrunner edit <task>
+taskrunner run <task> [--set <key>=<value>]...
+```
 
 Show command help:
 
 ```sh
-./taskrunner --help
+taskrunner --help
 ```
 
-Open task creation directly:
+Open the task editor directly:
 
 ```sh
-./taskrunner create
-```
-
-Open an existing task in the editor:
-
-```sh
-./taskrunner edit "Deploy"
+taskrunner create
+taskrunner edit "Deploy"
 ```
 
 Run a task without opening the TUI:
 
 ```sh
-./taskrunner run "Deploy" \
+taskrunner run "Deploy" \
   --set environment=staging \
-  --set version=1.4.0
+  --set version=1.4.0 \
+  --set confirmed=true
 ```
 
-Task names are matched case-insensitively by display name, JSON filename, or filename without `.json`.
+Task names match case-insensitively by display name, JSON filename, or filename without `.json`.
 
-For direct CLI execution:
+Direct runs require every required field:
 
-- Every required field must be supplied with `--set`.
 - Optional text, choice, and file fields default to an empty value.
 - Optional confirmations default to `false`.
-- Choice values must match one of the field's configured options.
 - Required confirmations must be set to `true`.
+- Choice values must match a configured option.
 - Unknown field keys are rejected.
 
-Quote `key=value` when the value contains shell whitespace or characters interpreted by your shell:
+Quote `key=value` when the value contains whitespace or shell characters:
 
 ```sh
-./taskrunner run "Release" --set 'note=release candidate'
+taskrunner run "Release" --set 'note=release candidate'
 ```
 
 ## Task files
 
-Each task is stored as a separate JSON file:
+Taskrunner stores one JSON file per task:
 
 ```text
 <workspace>/.taskrunner/tasks/<task-name>.json
@@ -140,7 +146,7 @@ Example:
 ```json
 {
   "name": "Deploy",
-  "command": "deploy --environment {{environment}} --config {{config}} {{extra}}",
+  "command": "deploy --environment {{environment}} --version {{version}}",
   "fields": [
     {
       "key": "environment",
@@ -152,41 +158,37 @@ Example:
       ]
     },
     {
-      "key": "config",
-      "label": "Configuration file",
-      "type": "file"
+      "key": "version",
+      "label": "Version",
+      "type": "text"
     },
     {
-      "key": "extra",
-      "label": "Additional trusted arguments",
-      "type": "text",
-      "optional": true,
-      "raw": true
+      "key": "confirmed",
+      "label": "Deploy {{version}} to {{environment}}?",
+      "type": "confirm"
     }
   ]
 }
 ```
 
-Field keys become command placeholders using `{{key}}` syntax. Fields are evaluated in their JSON order.
-
-Tasks with no fields run immediately.
+Fields are evaluated in JSON order. Tasks without fields run immediately.
 
 ### Field properties
 
-| Property | Required | Meaning |
+| Property | Required | Description |
 | --- | --- | --- |
-| `key` | Yes | Unique placeholder key. Must begin with a letter and contain only letters, numbers, or underscores. |
-| `label` | Yes | Prompt shown to the user. |
+| `key` | Yes | Unique placeholder key. Starts with a letter and contains only letters, numbers, or underscores. |
+| `label` | Yes | Prompt displayed at runtime. |
 | `type` | Yes | `text`, `choice`, `file`, or `confirm`. |
-| `options` | Choice fields | Allowed choice values. |
+| `options` | For `choice` | Allowed choice values. |
 | `optional` | No | Allows the field to be skipped. Defaults to `false`. |
-| `raw` | No | Disables shell quoting for this field. Defaults to `false`. |
+| `raw` | No | Inserts the value as shell syntax instead of quoting it. Defaults to `false`. |
 
-## Shell interpolation and security
+## Shell interpolation
 
-Taskrunner shell-quotes normal field values before replacing placeholders. Spaces, quotes, command substitutions, redirects, pipes, and other shell syntax remain part of one argument.
+Taskrunner shell-quotes field values before replacing command placeholders. Spaces, quotes, command substitutions, redirects, pipes, and other shell syntax remain part of one argument.
 
-Raw fields bypass quoting:
+A raw field bypasses quoting:
 
 ```json
 {
@@ -197,19 +199,20 @@ Raw fields bypass quoting:
 }
 ```
 
-Raw values execute as shell syntax. Use raw mode only for trusted task files and trusted input. The TUI marks raw fields and displays a runtime warning.
+Raw values execute as shell syntax. Use raw mode only with trusted task files and input. The TUI marks raw fields and displays a warning before execution.
 
-Commands run through `$SHELL -c` with the workspace as the command directory. If `$SHELL` is empty, Taskrunner uses `/bin/sh`.
+## Workspace data
 
-## Sharing tasks
+| Path | Contents |
+| --- | --- |
+| `.taskrunner/tasks/` | Task definitions |
+| `.taskrunner/history/` | Runtime text-field history |
 
-To share tasks, copy the relevant JSON files from `.taskrunner/tasks/`. A recipient can place them in the same directory under another workspace.
+Taskrunner generates task filenames and rejects paths outside `.taskrunner/tasks/`. It writes task and history files through temporary files and atomic renames. History files use owner-only permissions.
 
-Taskrunner validates task files when loading them. A malformed task prevents startup and reports the affected filename.
+To share a task, copy its JSON file from `.taskrunner/tasks/` into the same directory in another workspace. Taskrunner validates every task when loading it and reports the filename of malformed input.
 
 ## Development
-
-Format and verify changes with:
 
 ```sh
 gofmt -w .
@@ -218,10 +221,10 @@ go vet ./...
 go build ./...
 ```
 
-For TUI behavior or layout changes, also run the binary in a PTY and check narrow/short and wide/tall terminal sizes.
+Run TUI changes in a PTY. Check narrow and short terminals as well as wide and tall terminals.
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) before submitting a change.
 
 ## License
 
-Taskrunner is licensed under the [MIT License](LICENSE).
-
-Dependencies remain under their own licenses. Source and binary distributions must include [THIRD_PARTY_NOTICES](THIRD_PARTY_NOTICES). Contributions, including AI-assisted contributions, are subject to the provenance requirements in [CONTRIBUTING.md](CONTRIBUTING.md).
+Taskrunner is available under the [MIT License](LICENSE). Dependencies retain their own licenses; source and binary distributions must include [THIRD_PARTY_NOTICES](THIRD_PARTY_NOTICES).

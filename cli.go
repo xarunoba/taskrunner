@@ -151,8 +151,12 @@ func prepareTaskValues(item task.Task, supplied map[string]string) (map[string]s
 
 		switch field.Type {
 		case task.FieldChoice:
-			if value != "" && !contains(field.Options, value) {
-				return nil, fmt.Errorf("field %q must be one of: %s", field.Key, strings.Join(field.Options, ", "))
+			options := make([]string, len(field.Options))
+			for i, option := range field.Options {
+				options[i] = task.ResolveKnownValues(option, values)
+			}
+			if value != "" && !contains(options, value) {
+				return nil, fmt.Errorf("field %q must be one of: %s", field.Key, strings.Join(options, ", "))
 			}
 		case task.FieldConfirm:
 			confirmed, err := strconv.ParseBool(value)
