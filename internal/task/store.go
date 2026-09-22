@@ -1,0 +1,165 @@
+package task
+
+import (
+	"encoding/json"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+	"unicode"
+)
+
+var ErrTaskExists = errors.New("task already exists")
+
+type Store struct {
+	workspace string
+	dir       string
+}
+
+func NewStore(workspace string) *Store {
+	return &Store{
+		workspace: workspace,
+		dir:       filepath.Join(workspace, ".taskrunner", "tasks"),
+	}
+}
+
+func (s *Store) Workspace() string {
+	return s.workspace
+}
+
+func (s *Store) Load() ([]Task, error) {
+	entries, err := os.ReadDir(s.dir)
+	if errors.Is(err, os.ErrNotExist) {
+		return []Task{}, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read tasks: %w", err)
+	}
+
+	tasks := make([]Task, 0, len(entries))
+	for _, entry := range entries {
+		if entry.IsDir() || filepath.Ext(entry.Name()) != ".json" {
+			continue
+		}
+
+		path := filepath.Join(s.dir, entry.Name())
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return nil, fmt.Errorf("read task %q: %w", entry.Name(), err)
+		}
+
+		var item Task
+		if err := json.Unmarshal(data, &item); err != nil {
+			return nil, fmt.Errorf("decode task %q: %w", entry.Name(), err)
+		}
+		if err := item.Validate(); err != nil {
+			return nil, fmt.Errorf("decode task %q: %w", entry.Name(), err)
+		}
+		item.File = entry.Name()
+		tasks = append(tasks, item)
+	}
+
+	sort.Slice(tasks, func(i, j int) bool {
+		return strings.ToLower(tasks[i].Name) < strings.ToLower(tasks[j].Name)
+	})
+	return tasks, nil
+}
+
+func (s *Store) Save(item Task, previousFile string) (Task, error) {
+	item.Name = strings.TrimSpace(item.Name)
+	item.Command = strings.TrimSpace(item.Command)
+	for i := range item.Fields {
+		item.Fields[i].Key = strings.TrimSpace(item.Fields[i].Key)
+		item.Fields[i].Label = strings.TrimSpace(item.Fields[i].Label)
+		for j := range item.Fields[i].Options {
+			item.Fields[i].Options[j] = strings.TrimSpace(item.Fields[i].Options[j])
+		}
+	}
+	if err := item.Validate(); err != nil {
+		return Task{}, err
+	}
+
+	if err := os.MkdirAll(s.dir, 0o755); err != nil {
+		return Task{}, fmt.Errorf("create task directory: %w", err)
+	}
+
+	fileSlug := slug(item.Name)
+	if fileSlug == "" {
+		return Task{}, errors.New("name must contain a letter or number")
+	}
+	item.File = fileSlug + ".json"
+	if item.File != previousFile {
+		if _, err := os.Stat(filepath.Join(s.dir, item.File)); err == nil {
+			return Task{}, fmt.Errorf("%w: %s", ErrTaskExists, item.Name)
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return Task{}, fmt.Errorf("check task destination: %w", err)
+		}
+	}
+
+	file, err := os.CreateTemp(s.dir, ".task-*.json")
+	if err != nil {
+		return Task{}, fmt.Errorf("create temporary task: %w", err)
+	}
+	tempName := file.Name()
+	defer func() {
+		_ = os.Remove(tempName) // The rename below removes this path on success.
+	}()
+
+	encoder := json.NewEncoder(file)
+	encoder.SetIndent("", "  ")
+	encoder.SetEscapeHTML(false)
+	if err := encoder.Encode(item); err != nil {
+		_ = file.Close()
+		return Task{}, fmt.Errorf("encode task: %w", err)
+	}
+	if err := file.Chmod(0o644); err != nil {
+		_ = file.Close()
+		return Task{}, fmt.Errorf("set task permissions: %w", err)
+	}
+	if err := file.Close(); err != nil {
+		return Task{}, fmt.Errorf("close task: %w", err)
+	}
+
+	target := filepath.Join(s.dir, item.File)
+	if err := os.Rename(tempName, target); err != nil {
+		return Task{}, fmt.Errorf("save task: %w", err)
+	}
+	if previousFile != "" && previousFile != item.File {
+		if err := s.remove(previousFile); err != nil {
+			return Task{}, fmt.Errorf("remove renamed task: %w", err)
+		}
+	}
+	return item, nil
+}
+
+func (s *Store) Delete(item Task) error {
+	if err := s.remove(item.File); err != nil {
+		return fmt.Errorf("delete task %q: %w", item.Name, err)
+	}
+	return nil
+}
+
+func (s *Store) remove(name string) error {
+	if name == "" || filepath.Base(name) != name || filepath.Ext(name) != ".json" {
+		return errors.New("invalid task file")
+	}
+	return os.Remove(filepath.Join(s.dir, name))
+}
+
+func slug(name string) string {
+	var b strings.Builder
+	separator := false
+	for _, r := range strings.ToLower(name) {
+		switch {
+		case unicode.IsLetter(r) || unicode.IsNumber(r):
+			b.WriteRune(r)
+			separator = false
+		case b.Len() > 0 && !separator:
+			b.WriteByte('-')
+			separator = true
+		}
+	}
+	return strings.Trim(b.String(), "-")
+}
