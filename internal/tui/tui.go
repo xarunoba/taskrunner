@@ -56,6 +56,7 @@ var fieldTypes = []task.FieldType{
 	task.FieldChoice,
 	task.FieldFile,
 	task.FieldConfirm,
+	task.FieldRefer,
 }
 
 var jobPolicies = []task.JobPolicy{
@@ -123,9 +124,10 @@ type model struct {
 	editingFile      string
 	standaloneForm   bool
 
-	fieldInputs     [3]textinput.Model
+	fieldInputs     [5]textinput.Model
 	fieldFocus      int
 	fieldTypeCursor int
+	fieldFromCursor int
 	fieldRaw        bool
 	fieldOptional   bool
 	editingField    int
@@ -156,6 +158,8 @@ func newModel(store *task.Store, tasks []task.Task) model {
 	key := newInput("environment", 50)
 	label := newInput("Environment", 100)
 	options := newInput("development, staging, production", 1000)
+	prefix := newInput("--tag ", 200)
+	suffix := newInput(" 2>/dev/null", 200)
 	resultViewport := viewport.New(1, 1)
 	taskViewport := viewport.New(1, 1)
 	helpViewport := viewport.New(1, 1)
@@ -173,7 +177,7 @@ func newModel(store *task.Store, tasks []task.Task) model {
 		taskCommandInput: command,
 		taskViewport:     taskViewport,
 		helpViewport:     helpViewport,
-		fieldInputs:      [3]textinput.Model{key, label, options},
+		fieldInputs:      [5]textinput.Model{key, label, options, prefix, suffix},
 		editingField:     -1,
 		resultViewport:   resultViewport,
 	}

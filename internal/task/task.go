@@ -7,6 +7,7 @@ const (
 	FieldChoice  FieldType = "choice"
 	FieldFile    FieldType = "file"
 	FieldConfirm FieldType = "confirm"
+	FieldRefer   FieldType = "refer"
 )
 
 type JobPolicy string
@@ -23,6 +24,9 @@ type Field struct {
 	Label    string    `json:"label"`
 	Type     FieldType `json:"type"`
 	Options  []string  `json:"options,omitempty"`
+	From     string    `json:"from,omitempty"`
+	Prefix   string    `json:"prefix,omitempty"`
+	Suffix   string    `json:"suffix,omitempty"`
 	Raw      bool      `json:"raw,omitempty"`
 	Optional bool      `json:"optional,omitempty"`
 }

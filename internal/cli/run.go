@@ -86,6 +86,13 @@ func prepareTaskValues(item task.Task, supplied map[string]string) (map[string]s
 
 	values := make(map[string]string, len(item.Fields))
 	for _, field := range item.Fields {
+		if field.Type == task.FieldRefer {
+			if _, direct := supplied[field.Key]; direct {
+				return nil, fmt.Errorf("field %q derives from %q; set %q instead", field.Key, field.From, field.From)
+			}
+			values[field.Key] = values[field.From]
+			continue
+		}
 		value, supplied := supplied[field.Key]
 		if !supplied {
 			if !field.Optional {

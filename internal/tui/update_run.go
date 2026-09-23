@@ -16,11 +16,25 @@ func (m model) startRun(item task.Task) (tea.Model, tea.Cmd) {
 	m.runValues = make(map[string]string, len(item.Fields))
 	m.runHistoryIndex = -1
 	m.status = ""
-	if len(item.Fields) == 0 {
+	m.skipReferFields()
+	if m.runIndex == len(m.runTask.Fields) {
 		return m.executeRun()
 	}
 	m.showScreen(screenRun)
 	return m, m.prepareRunField()
+}
+
+// skipReferFields derives values for refer fields without prompting. It
+// advances the cursor to the next field that needs user input.
+func (m *model) skipReferFields() {
+	for m.runIndex < len(m.runTask.Fields) {
+		field := m.runTask.Fields[m.runIndex]
+		if field.Type != task.FieldRefer {
+			return
+		}
+		m.runValues[field.Key] = m.runValues[field.From]
+		m.runIndex++
+	}
 }
 
 func (m *model) prepareRunField() tea.Cmd {
@@ -204,6 +218,7 @@ func (m *model) moveRunHistory(direction int) {
 func (m model) advanceRun() (tea.Model, tea.Cmd) {
 	m.runIndex++
 	m.status = ""
+	m.skipReferFields()
 	if m.runIndex == len(m.runTask.Fields) {
 		return m.executeRun()
 	}
@@ -233,6 +248,9 @@ func (m model) previousRun() (tea.Model, tea.Cmd) {
 	}
 
 	m.runIndex--
+	for m.runIndex > 0 && m.runTask.Fields[m.runIndex].Type == task.FieldRefer {
+		m.runIndex--
+	}
 	m.status = ""
 	return m, m.prepareRunField()
 }

@@ -114,6 +114,38 @@ func TestPrepareTaskValuesRejectsMissingRequiredField(t *testing.T) {
 	}
 }
 
+func TestPrepareTaskValuesDerivesReferFields(t *testing.T) {
+	t.Parallel()
+
+	item := task.Task{
+		Name: "refer",
+		Fields: []task.Field{
+			{Key: "db", Label: "Database", Type: task.FieldText, Optional: true},
+			{Key: "r", Label: "Confirm DB", Type: task.FieldRefer, From: "db"},
+		},
+	}
+
+	values, err := prepareTaskValues(item, map[string]string{"db": "appdb"})
+	if err != nil {
+		t.Fatalf("prepareTaskValues() error = %v", err)
+	}
+	if values["r"] != "appdb" {
+		t.Fatalf("derived refer value = %q, want %q", values["r"], "appdb")
+	}
+
+	values, err = prepareTaskValues(item, nil)
+	if err != nil {
+		t.Fatalf("prepareTaskValues() error = %v", err)
+	}
+	if values["r"] != "" {
+		t.Fatalf("derived refer value = %q, want empty", values["r"])
+	}
+
+	if _, err := prepareTaskValues(item, map[string]string{"r": "other"}); err == nil {
+		t.Fatal("prepareTaskValues() with direct refer assignment = nil error, want error")
+	}
+}
+
 func TestExecuteTaskCLIUsesPreparedValues(t *testing.T) {
 	t.Parallel()
 
@@ -153,7 +185,7 @@ func TestExecuteTaskCLIUsesPreparedValues(t *testing.T) {
 	if err := executeTaskCLI(workspace, item, values, taskRunOptions{}, &output, &output); err != nil {
 		t.Fatalf("executeTaskCLI() error = %v", err)
 	}
-	if got, want := output.String(), "hello world||false"; got != want {
+	if got, want := output.String(), "hello world||"; got != want {
 		t.Fatalf("output = %q, want %q", got, want)
 	}
 

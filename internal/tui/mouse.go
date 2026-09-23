@@ -223,10 +223,18 @@ func (m model) clickFieldForm(line string, x int) (tea.Model, tea.Cmd) {
 	case strings.Contains(line, "Options (comma-separated)") || containsNonEmpty(line, m.fieldInputs[2].Value()):
 		m.fieldFocus = 3
 		m.fieldInputs[2].SetCursor(max(0, x-3))
+	case strings.Contains(line, "From (earlier field)"):
+		m.fieldFocus = 3
 	case line == "Interpolation":
 		m.fieldFocus = 4
-	case line == "Requirement":
+	case line == "Prefix" || containsNonEmpty(line, m.fieldInputs[3].Value()):
 		m.fieldFocus = 5
+		m.fieldInputs[3].SetCursor(max(0, x-3))
+	case line == "Suffix" || containsNonEmpty(line, m.fieldInputs[4].Value()):
+		m.fieldFocus = 6
+		m.fieldInputs[4].SetCursor(max(0, x-3))
+	case line == "Requirement":
+		m.fieldFocus = 7
 	default:
 		typeNames := make([]string, len(fieldTypes))
 		for i, fieldType := range fieldTypes {
@@ -239,8 +247,13 @@ func (m model) clickFieldForm(line string, x int) (tea.Model, tea.Cmd) {
 			m.fieldFocus = 4
 			m.fieldRaw = selected == 1
 		} else if selected := optionAtX(line, x-3, []string{"Required", "Optional"}); selected >= 0 {
-			m.fieldFocus = 5
+			m.fieldFocus = 7
 			m.fieldOptional = selected == 1
+		} else if fieldTypes[m.fieldTypeCursor] == task.FieldRefer {
+			if selected := optionAtX(line, x-3, m.referSourceKeys()); selected >= 0 {
+				m.fieldFocus = 3
+				m.fieldFromCursor = selected
+			}
 		}
 	}
 	return m, m.focusFieldControl()

@@ -6,6 +6,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/xarunoba/taskrunner/internal/task"
 )
 
 func (m model) listView() string {
@@ -59,8 +60,19 @@ func (m model) taskFieldLine(index int) string {
 	if field.Optional {
 		requirement = "optional"
 	}
-	line := fmt.Sprintf("%d. %s (%s, %s, %s → {{%s}})", index+1, field.Label, field.Type, requirement, mode, field.Key)
-	if m.taskFocus == 3 && index == m.fieldCursor {
+	if field.Type == task.FieldRefer {
+		requirement = "from " + field.From
+	}
+	fragment := "{{" + field.Key + "}}"
+	if field.Prefix != "" || field.Suffix != "" {
+		if field.Type == task.FieldConfirm {
+			fragment = field.Prefix + field.Suffix
+		} else {
+			fragment = field.Prefix + fragment + field.Suffix
+		}
+	}
+	line := fmt.Sprintf("%d. %s (%s, %s, %s → %s)", index+1, field.Label, field.Type, requirement, mode, fragment)
+	if m.taskFocus == 1 && index == m.fieldCursor {
 		return selectedStyle.Render("› " + line)
 	}
 	return "  " + line

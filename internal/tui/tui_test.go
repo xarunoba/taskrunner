@@ -612,6 +612,42 @@ func TestOpenTaskLogAppendsLiveOutput(t *testing.T) {
 	}
 }
 
+func TestTaskFormHighlightsSelectedField(t *testing.T) {
+	t.Parallel()
+
+	m := newModel(task.NewStore(t.TempDir()), nil)
+	m.resize(80, 24)
+	m.openTaskForm(task.Task{
+		Name: "Demo",
+		Fields: []task.Field{
+			{Key: "one", Label: "One", Type: task.FieldText},
+			{Key: "two", Label: "Two", Type: task.FieldText},
+		},
+	})
+
+	m.taskFocus = 1
+	m.fieldCursor = 0
+	view := ansi.Strip(m.View())
+	if !strings.Contains(view, "› 1. One") || strings.Contains(view, "› 2. Two") {
+		t.Fatalf("fields focused, cursor 0, wrong selection marker:\n%s", view)
+	}
+
+	m.fieldCursor = 1
+	view = ansi.Strip(m.View())
+	if !strings.Contains(view, "› 2. Two") || strings.Contains(view, "› 1. One") {
+		t.Fatalf("fields focused, cursor 1, wrong selection marker:\n%s", view)
+	}
+
+	m.taskFocus = 3
+	view = ansi.Strip(m.View())
+	if strings.Contains(view, "› 1. One") || strings.Contains(view, "› 2. Two") {
+		t.Fatalf("field lines highlighted while job policy focused:\n%s", view)
+	}
+	if !strings.Contains(view, "› Sequential") {
+		t.Fatalf("job policy row lost its selection marker:\n%s", view)
+	}
+}
+
 func TestTaskFormArrowAndMouseNavigation(t *testing.T) {
 	t.Parallel()
 
@@ -822,6 +858,118 @@ func TestRuntimeCanReturnToEarlierInput(t *testing.T) {
 	}
 }
 
+func TestFieldFormSavesReferField(t *testing.T) {
+	t.Parallel()
+
+	m := newModel(task.NewStore(t.TempDir()), nil)
+	m.resize(80, 24)
+	m.formFields = []task.Field{
+		{Key: "db", Label: "Database", Type: task.FieldText, Optional: true},
+	}
+	m.openFieldForm(-1)
+	m.fieldInputs[0].SetValue("r")
+	m.fieldInputs[1].SetValue("Confirm DB")
+
+	for range 2 { // focus: Key -> Label -> Type
+		updated, _ := m.updateFieldForm(tea.KeyMsg{Type: tea.KeyTab})
+		m = updated.(model)
+	}
+	for range 4 { // select refer in the type picker
+		updated, _ := m.updateFieldForm(tea.KeyMsg{Type: tea.KeyRight})
+		m = updated.(model)
+	}
+	if got := fieldTypes[m.fieldTypeCursor]; got != task.FieldRefer {
+		t.Fatalf("type = %q, want refer", got)
+	}
+
+	updated, _ := m.updateFieldForm(tea.KeyMsg{Type: tea.KeyTab})
+	m = updated.(model)
+	if m.fieldFocus != 3 {
+		t.Fatalf("focus = %d, want 3 for the From picker", m.fieldFocus)
+	}
+	updated, _ = m.updateFieldForm(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}})
+	m = updated.(model)
+	if got := m.fieldInputs[2].Value(); got != "" {
+		t.Fatalf("options input received %q while From picker focused, want no input", got)
+	}
+
+	updated, _ = m.updateFieldForm(tea.KeyMsg{Type: tea.KeyCtrlS})
+	m = updated.(model)
+	if len(m.formFields) != 2 {
+		t.Fatalf("field count = %d, want 2", len(m.formFields))
+	}
+	saved := m.formFields[1]
+	if saved.Type != task.FieldRefer || saved.From != "db" || saved.Optional {
+		t.Fatalf("saved field = %+v, want refer from db without optional", saved)
+	}
+}
+
+func TestRunSkipsReferFields(t *testing.T) {
+	t.Parallel()
+
+	item := task.Task{
+		Name:    "refer run",
+		Command: "true {{db}} {{r}}",
+		Fields: []task.Field{
+			{Key: "db", Label: "Database", Type: task.FieldText, Optional: true, Prefix: "--db "},
+			{Key: "r", Label: "Confirm DB", Type: task.FieldRefer, From: "db", Prefix: "--confirm "},
+		},
+	}
+	m := newModel(task.NewStore(t.TempDir()), []task.Task{item})
+	m.resize(80, 24)
+	started, _ := m.startRun(item)
+	m = started.(model)
+	if key := m.runTask.Fields[m.runIndex].Key; key != "db" {
+		t.Fatalf("first prompted field = %q, want db", key)
+	}
+
+	m.runInput.SetValue("appdb")
+	updated, _ := m.updateRunForm(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(model)
+	if got := m.runValues["r"]; got != "appdb" {
+		t.Fatalf("derived refer value = %q, want appdb", got)
+	}
+	if m.screen != screenList {
+		t.Fatalf("screen = %d after final field, want list (refer field must not prompt)", m.screen)
+	}
+}
+
+func TestFieldFormRoundTripsPrefixAndSuffix(t *testing.T) {
+	t.Parallel()
+
+	m := newModel(task.NewStore(t.TempDir()), nil)
+	m.resize(80, 24)
+	m.formFields = []task.Field{
+		{Key: "tag", Label: "Tag", Type: task.FieldText, Prefix: "--tag ", Suffix: "!"},
+	}
+
+	m.openFieldForm(0)
+	if got := m.fieldInputs[3].Value(); got != "--tag " {
+		t.Fatalf("prefix input = %q, want %q", got, "--tag ")
+	}
+	if got := m.fieldInputs[4].Value(); got != "!" {
+		t.Fatalf("suffix input = %q, want %q", got, "!")
+	}
+
+	m.fieldInputs[4].SetValue("")
+	updated, _ := m.saveFieldForm()
+	m = updated.(model)
+	if len(m.formFields) != 1 {
+		t.Fatalf("field count = %d, want 1", len(m.formFields))
+	}
+	saved := m.formFields[0]
+	if saved.Prefix != "--tag " || saved.Suffix != "" {
+		t.Fatalf("saved prefix = %q, suffix = %q, want %q and empty", saved.Prefix, saved.Suffix, "--tag ")
+	}
+
+	m.openFieldForm(-1)
+	for i := range m.fieldInputs {
+		if got := m.fieldInputs[i].Value(); got != "" {
+			t.Fatalf("input %d = %q on new field form, want empty", i, got)
+		}
+	}
+}
+
 func TestRuntimeTextHistoryUsesArrowKeys(t *testing.T) {
 	t.Parallel()
 
@@ -890,8 +1038,8 @@ func TestMouseSelectsFieldControlsAndRuntimeChoices(t *testing.T) {
 
 	updated, _ = m.updateMouse(mouseClickOn(t, m.View(), "Optional"))
 	m = updated.(model)
-	if !m.fieldOptional || m.fieldFocus != 5 {
-		t.Fatalf("optional click produced optional=%t focus=%d, want true and 5", m.fieldOptional, m.fieldFocus)
+	if !m.fieldOptional || m.fieldFocus != 7 {
+		t.Fatalf("optional click produced optional=%t focus=%d, want true and 7", m.fieldOptional, m.fieldFocus)
 	}
 	updated, _ = m.saveFieldForm()
 	m = updated.(model)

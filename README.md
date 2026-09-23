@@ -242,12 +242,30 @@ Fields are evaluated in JSON order. Tasks without fields run immediately. `job_p
 | --- | --- | --- |
 | `key` | Yes | Unique placeholder key. Starts with a letter and contains only letters, numbers, or underscores. |
 | `label` | Yes | Prompt displayed at runtime. |
-| `type` | Yes | `text`, `choice`, `file`, or `confirm`. |
+| `type` | Yes | `text`, `choice`, `file`, `confirm`, or `refer`. |
 | `options` | For `choice` | Allowed choice values. |
+| `from` | For `refer` | Earlier field whose value and presence this field mirrors. |
+| `prefix` | No | Text inserted before the value. Keeps leading and trailing whitespace. |
+| `suffix` | No | Text inserted after the value. Keeps leading and trailing whitespace. |
 | `optional` | No | Allows the field to be skipped. Defaults to `false`. |
 | `raw` | No | Inserts the value as shell syntax instead of quoting it. Defaults to `false`. |
 
-Taskrunner shell-quotes field values before replacing command placeholders, so spaces, quotes, pipes, and substitutions remain part of one argument. A `raw: true` field bypasses quoting and executes as shell syntax; use it only with trusted task files and input. The TUI marks raw fields and displays a warning before execution.
+A field's placeholder is replaced by `prefix` + value + `suffix` when the field has a value, and is removed from the command when it does not. Empty optional values and declined optional confirmations contribute nothing, so optional flags must live in `prefix` (write `--tag {{tag}}` as `{{tag}}` with `"prefix": "--tag "`). Confirm fields never insert their value: on Yes the placeholder becomes exactly `prefix` + `suffix`, which turns a confirm into a flag such as `"prefix": "--force"`.
+
+Fields whose placeholder does not appear in the command inject nothing and only gate execution: a required field must still be supplied or confirmed before the task runs.
+
+`refer` fields are never prompted. They mirror the presence and value of the earlier field named by `from`, wrapped in their own `prefix`, `suffix`, and `raw` settings, so one answer can drive several command flags:
+
+```json
+{ "key": "db", "label": "Database", "type": "text", "optional": true, "prefix": "--db " },
+{ "key": "confirmDb", "label": "Confirm DB", "type": "refer", "from": "db", "prefix": "--confirm " }
+```
+
+`--db {{db}} --confirm {{confirmDb}}` renders both fragments when a database is given and neither when it is left empty. A refer field whose `from` names a confirm contributes no value: it renders its `prefix` + `suffix` only when the confirmation is Yes.
+
+`file` fields show a workspace-rooted file picker. Selecting a file inserts its absolute path, shell-quoted, as a single command argument; only files can be selected, and hidden files are shown.
+
+Taskrunner shell-quotes field values before replacing command placeholders, so spaces, quotes, pipes, and substitutions remain part of one argument. A `raw: true` field bypasses quoting and executes as shell syntax; `prefix` and `suffix` are always literal text and are never quoted. Use raw fields only with trusted task files and input. The TUI marks raw fields and displays a warning before execution.
 
 ## Workspace data
 

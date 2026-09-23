@@ -23,11 +23,22 @@ func (m model) fieldFormView() string {
 		typeNames[i] = string(fieldType)
 	}
 	body.WriteString(m.pickerRow(typeNames, m.fieldTypeCursor))
-	if fieldTypes[m.fieldTypeCursor] == task.FieldChoice {
+	fieldType := fieldTypes[m.fieldTypeCursor]
+	if fieldType == task.FieldChoice {
 		body.WriteString(m.gap())
 		body.WriteString(taskStepTitle("Options (comma-separated)", m.fieldFocus == 3))
 		body.WriteByte('\n')
 		body.WriteString(m.fieldInputs[2].View())
+	}
+	if fieldType == task.FieldRefer {
+		body.WriteString(m.gap())
+		body.WriteString(taskStepTitle("From (earlier field)", m.fieldFocus == 3))
+		body.WriteByte('\n')
+		if keys := m.referSourceKeys(); len(keys) > 0 {
+			body.WriteString(m.pickerRow(keys, min(m.fieldFromCursor, len(keys)-1)))
+		} else {
+			body.WriteString(mutedStyle.Render("No earlier fields to reference"))
+		}
 	}
 	body.WriteString(m.gap())
 	body.WriteString(taskStepTitle("Interpolation", m.fieldFocus == 4))
@@ -42,12 +53,22 @@ func (m model) fieldFormView() string {
 		body.WriteString(errorStyle.Render("Warning: raw values execute as shell syntax."))
 	}
 	body.WriteString(m.gap())
-	body.WriteString(taskStepTitle("Requirement", m.fieldFocus == 5))
+	body.WriteString(taskStepTitle("Prefix", m.fieldFocus == 5))
 	body.WriteByte('\n')
-	requirement := 0
-	if m.fieldOptional {
-		requirement = 1
+	body.WriteString(m.fieldInputs[3].View())
+	body.WriteString(m.gap())
+	body.WriteString(taskStepTitle("Suffix", m.fieldFocus == 6))
+	body.WriteByte('\n')
+	body.WriteString(m.fieldInputs[4].View())
+	if fieldType != task.FieldRefer {
+		body.WriteString(m.gap())
+		body.WriteString(taskStepTitle("Requirement", m.fieldFocus == 7))
+		body.WriteByte('\n')
+		requirement := 0
+		if m.fieldOptional {
+			requirement = 1
+		}
+		body.WriteString(m.pickerRow([]string{"Required", "Optional"}, requirement))
 	}
-	body.WriteString(m.pickerRow([]string{"Required", "Optional"}, requirement))
 	return m.renderWorkspacePanel(body.String(), screenField)
 }
