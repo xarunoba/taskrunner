@@ -7,14 +7,7 @@ import (
 )
 
 func (m model) fieldFormView() string {
-	title := "ADD FIELD"
-	if m.editingField >= 0 {
-		title = "EDIT FIELD"
-	}
-
 	var body strings.Builder
-	body.WriteString(accentStyle.Render(title))
-	body.WriteString(m.gap())
 	body.WriteString(taskStepTitle("Key", m.fieldFocus == 0))
 	body.WriteByte('\n')
 	body.WriteString(m.fieldInputs[0].View())

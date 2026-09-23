@@ -1,9 +1,11 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/xarunoba/taskrunner/internal/task"
 )
@@ -41,14 +43,8 @@ func (m model) updateMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	}
 
 	line := m.mouseLine(event.Y)
-	if m.mouseLineIsLastMatch(event.Y, "keybinds") {
-		switch optionAtX(line, event.X-3, m.footerControls()) {
-		case 0:
-			m.switchTab(otherTopLevelTab(m.screen))
-			return m, nil
-		case 1:
-			return m, tea.Quit
-		case 2:
+	if !m.helpOpen && m.mouseLineIsLastMatch(event.Y, helpChipText) {
+		if start, end := m.helpChipColumns(); event.X >= start && event.X < end {
 			m.openHelp()
 			return m, nil
 		}
@@ -94,24 +90,20 @@ func (m model) mouseLineIsLastMatch(y int, text string) bool {
 	return false
 }
 
-func (m model) clickTaskList(line string, x int) (tea.Model, tea.Cmd) {
-	if strings.Contains(line, "enter run") {
-		switch optionAtX(line, x-3, []string{"enter run", "n new", "e edit", "d delete", "q quit"}) {
-		case 0:
-			return m.updateList(tea.KeyMsg{Type: tea.KeyEnter})
-		case 1:
-			return m.updateList(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
-		case 2:
-			return m.updateList(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'e'}})
-		case 3:
-			return m.updateList(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
-		case 4:
-			return m, tea.Quit
-		}
+func (m model) helpChipColumns() (int, int) {
+	width := m.width
+	if width <= 0 {
+		width = 80
 	}
+	end := width - 1
+	start := max(1, end-m.helpChipWidth())
+	return start, end
+}
+
+func (m model) clickTaskList(line string, x int) (tea.Model, tea.Cmd) {
 	for i, item := range m.tasks {
-		name := ansi.Truncate(item.Name, max(1, m.contentWidth()-2), "…")
-		if strings.Contains(line, name) {
+		row := item.Name + m.taskActivity(item.File)
+		if line == row || line == "› "+row {
 			m.cursor = i
 			return m, nil
 		}
@@ -120,40 +112,38 @@ func (m model) clickTaskList(line string, x int) (tea.Model, tea.Cmd) {
 }
 
 func (m model) clickJobs(line string, x int) (tea.Model, tea.Cmd) {
-	if strings.Contains(line, "enter log") {
-		switch optionAtX(line, x-3, []string{"enter log", "c cancel", "r rerun", "d delete job", "q quit"}) {
-		case 0:
-			return m.updateJobs(tea.KeyMsg{Type: tea.KeyEnter})
-		case 1:
-			return m.updateJobs(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'c'}})
-		case 2:
-			return m.updateJobs(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
-		case 3:
-			return m.updateJobs(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
-		case 4:
-			return m, tea.Quit
-		}
-	}
 	for i := range m.jobs {
 		job := m.jobs[len(m.jobs)-1-i]
-		if !strings.Contains(line, job.ShortID()) {
-			continue
+		row := fmt.Sprintf("%-9s %s  %s", strings.ToUpper(string(job.Status)), job.Name, job.ShortID())
+		if line == row || line == "› "+row {
+			if m.jobCursor == i {
+				return m, m.openJob(job.ID)
+			}
+			m.jobCursor = i
+			return m, nil
 		}
-		if m.jobCursor == i {
-			return m, m.openJob(job.ID)
-		}
-		m.jobCursor = i
-		return m, nil
 	}
 	return m, nil
 }
 
+// tabRegionWidth is the fixed rendered column width of "╭─ " plus the
+// padded "Tasks" and "Jobs" tab labels and their separator.
+var tabRegionWidth = lipgloss.Width("╭─ ") + lipgloss.Width(" Tasks ") + 1 + lipgloss.Width(" Jobs ")
+
 func (m model) topLevelTabAt(y, x int) (screen, bool) {
-	lines := strings.Split(ansi.Strip(m.View()), "\n")
-	if y < 0 || y >= len(lines) {
+	if y != 0 {
 		return 0, false
 	}
-	line := lines[y]
+	lines := strings.Split(ansi.Strip(m.View()), "\n")
+	if len(lines) == 0 {
+		return 0, false
+	}
+	// Compare in terminal columns: rune offsets match columns here, byte
+	// offsets from strings.Index would shift after the multi-byte border.
+	runes := []rune(lines[0])
+	if len(runes) > tabRegionWidth {
+		runes = runes[:tabRegionWidth]
+	}
 	for _, tab := range []struct {
 		label  string
 		screen screen
@@ -161,12 +151,30 @@ func (m model) topLevelTabAt(y, x int) (screen, bool) {
 		{label: "Tasks", screen: screenList},
 		{label: "Jobs", screen: screenJobs},
 	} {
-		start := strings.Index(line, tab.label)
+		start := runeIndex(runes, tab.label)
 		if start >= 0 && x >= start && x < start+len(tab.label) {
 			return tab.screen, true
 		}
 	}
 	return 0, false
+}
+
+// runeIndex returns the first rune offset of s in r, or -1.
+func runeIndex(r []rune, s string) int {
+	target := []rune(s)
+	for i := 0; i+len(target) <= len(r); i++ {
+		match := true
+		for j := range target {
+			if r[i+j] != target[j] {
+				match = false
+				break
+			}
+		}
+		if match {
+			return i
+		}
+	}
+	return -1
 }
 
 func (m model) clickTaskForm(line string, x int) (tea.Model, tea.Cmd) {
@@ -245,12 +253,13 @@ func (m model) clickRunForm(line string, x int) (tea.Model, tea.Cmd) {
 		m.runInput.SetCursor(max(0, x-3))
 		return m, m.runInput.Focus()
 	case task.FieldChoice:
-		if field.Optional && strings.Contains(line, "Skip") {
+		if field.Optional && (strings.HasPrefix(line, "› Skip") || line == "Skip") {
 			m.choiceCursor = -1
 			break
 		}
 		for i, option := range field.Options {
-			if strings.Contains(line, task.ResolveKnownValues(option, m.runValues)) {
+			resolved := task.ResolveKnownValues(option, m.runValues)
+			if line == resolved || line == "› "+resolved {
 				m.choiceCursor = i
 				break
 			}

@@ -296,21 +296,23 @@ func TestWorkspaceHeaderUsesTopBorder(t *testing.T) {
 	if tasks < 0 || jobs <= tasks || path <= jobs {
 		t.Fatalf("top border does not contain ordered tabs and workspace:\n%s", header)
 	}
-	footer := lines[len(lines)-2]
-	if !strings.HasPrefix(footer, "╰─ ") || !strings.Contains(footer, "tab switch") {
-		t.Fatalf("bottom border does not contain navigation controls:\n%s", footer)
+	footer := lines[len(lines)-1]
+	if !strings.HasPrefix(footer, "╰") || !strings.HasSuffix(footer, "╯") {
+		t.Fatalf("footer does not show the bottom border corners:\n%s", footer)
 	}
-	status := lines[len(lines)-1]
-	if !strings.Contains(status, "Saved") {
-		t.Fatalf("status does not render below the bottom border:\n%s", view)
+	status := footer
+	if !strings.Contains(status, "Saved") || !strings.Contains(status, "? keybinds") {
+		t.Fatalf("footer does not contain the status message and keybinds chip:\n%s", view)
 	}
-	styledStatus := strings.Split(styledView, "\n")[len(lines)-1]
-	if styledStatus != statusBarStyle.Render(status) {
-		t.Fatalf("status background does not span the full terminal width:\n%q", styledStatus)
+	styledFooter := strings.Split(styledView, "\n")[len(lines)-1]
+	if !strings.Contains(styledFooter, statusBarStyle.Render(" Saved")) {
+		t.Fatalf("status message does not use the status bar background:\n%s", styledFooter)
 	}
-	if statusBarStyle.GetForeground() != inactiveTabStyle.GetForeground() ||
-		statusBarStyle.GetBackground() != inactiveTabStyle.GetBackground() {
-		t.Fatal("default status bar colors do not match the inactive tab")
+	if !strings.Contains(styledFooter, helpChipStyle.Render("? keybinds")) {
+		t.Fatalf("keybinds chip does not use its own background:\n%s", styledFooter)
+	}
+	if strings.Contains(view, "tab switch") || strings.Contains(view, "q quit") {
+		t.Fatalf("footer still contains navigation controls:\n%s", view)
 	}
 	if strings.Contains(view, "TASKRUNNER") {
 		t.Fatalf("view still contains the taskrunner title:\n%s", view)
@@ -321,24 +323,20 @@ func TestFooterShowsOnlyTopLevelControls(t *testing.T) {
 
 	m := newModel(task.NewStore(t.TempDir()), nil)
 	m.resize(80, 24)
-	footer := ansi.Strip(strings.Split(m.View(), "\n")[m.height-2])
-	for _, text := range []string{"tab switch to Jobs", "q quit", "? keybinds"} {
-		if !strings.Contains(footer, text) {
-			t.Fatalf("Tasks footer does not contain %q:\n%s", text, footer)
-		}
+	footer := ansi.Strip(strings.Split(m.View(), "\n")[m.height-1])
+	if !strings.Contains(footer, "? keybinds") {
+		t.Fatalf("Tasks footer does not contain %q:\n%s", "? keybinds", footer)
 	}
-	for _, text := range []string{"enter run", "n new", "e edit", "d delete"} {
+	for _, text := range []string{"enter run", "n new", "e edit", "d delete", "tab switch", "q quit"} {
 		if strings.Contains(footer, text) {
-			t.Fatalf("Tasks footer still contains screen action %q:\n%s", text, footer)
+			t.Fatalf("Tasks footer still contains control %q:\n%s", text, footer)
 		}
 	}
 
 	m.openTaskForm(task.Task{})
-	footer = ansi.Strip(strings.Split(m.View(), "\n")[m.height-2])
-	for _, text := range []string{"f6 switch to Jobs", "ctrl+c quit", "f1 keybinds"} {
-		if !strings.Contains(footer, text) {
-			t.Fatalf("text-input footer does not contain %q:\n%s", text, footer)
-		}
+	footer = ansi.Strip(strings.Split(m.View(), "\n")[m.height-1])
+	if !strings.Contains(footer, "? keybinds") {
+		t.Fatalf("text-input footer does not contain %q:\n%s", "? keybinds", footer)
 	}
 }
 
@@ -355,15 +353,10 @@ func TestFooterControlsSupportMouseInput(t *testing.T) {
 	}
 	m.helpOpen = false
 
-	updated, _ = m.updateMouse(mouseClickOn(t, m.View(), "tab switch to Jobs"))
+	updated, _ = m.updateMouse(mouseClickAt(m.width-1, m.height-1))
 	m = updated.(model)
-	if m.screen != screenJobs {
-		t.Fatalf("clicking tab switch produced screen %d, want Jobs", m.screen)
-	}
-
-	_, cmd := m.updateMouse(mouseClickOn(t, m.View(), "q quit"))
-	if cmd == nil {
-		t.Fatal("clicking quit footer control did not return a quit command")
+	if m.helpOpen {
+		t.Fatal("clicking the bottom border corner opened help")
 	}
 }
 
@@ -1035,16 +1028,21 @@ func mouseClickOn(t *testing.T, view, text string) tea.MouseMsg {
 	t.Helper()
 	for y, line := range strings.Split(ansi.Strip(view), "\n") {
 		if x := strings.Index(line, text); x >= 0 {
-			return tea.MouseMsg(tea.MouseEvent{
-				X:      x,
-				Y:      y,
-				Action: tea.MouseActionPress,
-				Button: tea.MouseButtonLeft,
-			})
+			// strings.Index is a byte offset; mouse X is a column.
+			return mouseClickAt(len([]rune(line[:x])), y)
 		}
 	}
 	t.Fatalf("view does not contain clickable text %q", text)
 	return tea.MouseMsg{}
+}
+
+func mouseClickAt(x, y int) tea.MouseMsg {
+	return tea.MouseMsg(tea.MouseEvent{
+		X:      x,
+		Y:      y,
+		Action: tea.MouseActionPress,
+		Button: tea.MouseButtonLeft,
+	})
 }
 
 func assertFillsTerminal(t *testing.T, view string, width, height int) {

@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"fmt"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -21,30 +20,10 @@ func scrollBar(height int, scrollable bool, percent float64) string {
 	return strings.Join(lines, "\n")
 }
 
-func (m model) footerControls() []string {
-	target := "Jobs"
-	switchKey := "tab"
-	if topLevelTab(m.screen) == screenJobs {
-		target = "Tasks"
-	}
-	if m.screen != screenList && m.screen != screenJobs {
-		switchKey = "f6"
-	}
-	quitKey := "q"
-	helpKey := "?"
-	if m.acceptsTextInput() {
-		quitKey = "ctrl+c"
-		helpKey = "f1"
-	}
-	return []string{
-		fmt.Sprintf("%s switch to %s", switchKey, target),
-		quitKey + " quit",
-		helpKey + " keybinds",
-	}
-}
+const helpChipText = "? keybinds"
 
-func (m model) topLevelFooter() string {
-	return strings.Join(m.footerControls(), " • ")
+func (m model) helpChipWidth() int {
+	return ansi.StringWidth(helpChipStyle.Render(helpChipText))
 }
 
 func (m model) View() string {
@@ -63,8 +42,7 @@ func (m model) View() string {
 		),
 	)
 	if m.compactHelp() {
-		panel := titledPanel(m.renderPanelWithFooter(help), m.helpTitle())
-		return panel + "\n" + m.statusBar()
+		return titledPanel(m.renderPanelWithFooter(help), m.helpTitle())
 	}
 	return overlay(base, titledPanel(helpModalStyle.Render(help), m.helpTitle()), m.width, m.height)
 }
@@ -195,7 +173,7 @@ func (m model) renderWorkspacePanel(content string, active screen) string {
 	if ok {
 		view += "\n" + rest
 	}
-	return view + "\n" + m.statusBar()
+	return view
 }
 
 func visibleRange(total, current, limit int) (int, int) {
@@ -217,30 +195,25 @@ func (m model) statusBar() string {
 	if width <= 0 {
 		width = 80
 	}
-	message := ansi.Truncate(m.status, max(1, width-2), "…")
+	inner := max(1, width-2)
+	chip := helpChipStyle.Render(helpChipText)
+	chipWidth := m.helpChipWidth()
+	message := ansi.Truncate(m.status, max(1, inner-chipWidth-1), "…")
 	line := " " + message
-	line += strings.Repeat(" ", max(0, width-ansi.StringWidth(line)))
-	line = ansi.Truncate(line, width, "")
+	line += strings.Repeat(" ", max(0, inner-chipWidth-ansi.StringWidth(line)))
+	line += chip
+	line = ansi.Truncate(line, inner, "")
+	line += strings.Repeat(" ", max(0, inner-ansi.StringWidth(line)))
 	style := statusBarStyle
 	if m.statusError {
 		style = statusBarErrorStyle
 	}
-	return style.Render(line)
-}
-
-func (m model) navigationFooter() string {
-	width := m.contentWidth() + panelStyle.GetHorizontalFrameSize()
-	titleWidth := max(0, width-5)
-	title := mutedStyle.Render(ansi.Truncate(m.topLevelFooter(), titleWidth, "…"))
-	fillWidth := max(0, width-ansi.StringWidth(title)-5)
-	return borderStyle.Render("╰─ ") +
-		title +
-		borderStyle.Render(" "+strings.Repeat("─", fillWidth)+"╯")
+	return borderStyle.Render("╰") + style.Render(line) + borderStyle.Render("╯")
 }
 
 func (m model) renderPanelWithFooter(content string) string {
 	lines := strings.Split(m.renderPanel(content), "\n")
-	lines[len(lines)-1] = m.navigationFooter()
+	lines[len(lines)-1] = m.statusBar()
 	return strings.Join(lines, "\n")
 }
 

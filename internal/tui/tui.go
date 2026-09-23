@@ -43,6 +43,7 @@ var (
 	panelStyle          = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(accentColor).Padding(1, 2)
 	statusBarStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("250")).Background(lipgloss.Color("236"))
 	statusBarErrorStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("230")).Background(lipgloss.Color("196")).Bold(true)
+	helpChipStyle       = lipgloss.NewStyle().Foreground(lipgloss.Color("230")).Background(lipgloss.Color("57")).Bold(true).Padding(0, 1)
 	jobQueuedStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("230")).Background(accentColor).Bold(true).Padding(0, 1)
 	jobSucceededStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("0")).Background(lipgloss.Color("42")).Bold(true).Padding(0, 1)
 	jobFailedStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("230")).Background(lipgloss.Color("196")).Bold(true).Padding(0, 1)
@@ -214,7 +215,7 @@ func (m model) contentHeight() int {
 	if height <= 0 {
 		height = 40
 	}
-	return max(1, height-panelStyle.GetVerticalFrameSize()-1)
+	return max(1, height-panelStyle.GetVerticalFrameSize())
 }
 
 func (m *model) resizeTaskForm() {

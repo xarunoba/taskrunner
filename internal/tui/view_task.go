@@ -88,11 +88,6 @@ func (m model) taskFormView() string {
 }
 
 func (m model) taskFormContent() (string, int) {
-	title := "NEW TASK"
-	if m.editingFile != "" {
-		title = "EDIT TASK"
-	}
-
 	var body strings.Builder
 	line := 0
 	write := func(value string) {
@@ -100,9 +95,6 @@ func (m model) taskFormContent() (string, int) {
 		line += strings.Count(value, "\n")
 	}
 	focusLine := 0
-
-	write(accentStyle.Render(title))
-	write(m.gap())
 
 	if m.taskFocus == 0 {
 		focusLine = line
