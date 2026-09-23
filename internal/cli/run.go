@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -74,12 +75,12 @@ func addFieldAssignment(values map[string]string, assignment string) error {
 }
 
 func prepareTaskValues(item task.Task, supplied map[string]string) (map[string]string, error) {
-	fields := make(map[string]task.Field, len(item.Fields))
+	fieldKeys := make(map[string]struct{}, len(item.Fields))
 	for _, field := range item.Fields {
-		fields[field.Key] = field
+		fieldKeys[field.Key] = struct{}{}
 	}
 	for key := range supplied {
-		if _, ok := fields[key]; !ok {
+		if _, ok := fieldKeys[key]; !ok {
 			return nil, fmt.Errorf("task %q has no field %q", item.Name, key)
 		}
 	}
@@ -93,8 +94,8 @@ func prepareTaskValues(item task.Task, supplied map[string]string) (map[string]s
 			values[field.Key] = values[field.From]
 			continue
 		}
-		value, supplied := supplied[field.Key]
-		if !supplied {
+		value, ok := supplied[field.Key]
+		if !ok {
 			if !field.Optional {
 				return nil, fmt.Errorf("missing required field %q; use --set %s=<value>", field.Key, field.Key)
 			}
@@ -115,7 +116,7 @@ func prepareTaskValues(item task.Task, supplied map[string]string) (map[string]s
 			for i, option := range field.Options {
 				options[i] = task.ResolveKnownValues(option, values)
 			}
-			if value != "" && !contains(options, value) {
+			if value != "" && !slices.Contains(options, value) {
 				return nil, fmt.Errorf("field %q must be one of: %s", field.Key, strings.Join(options, ", "))
 			}
 		case task.FieldConfirm:
@@ -131,15 +132,6 @@ func prepareTaskValues(item task.Task, supplied map[string]string) (map[string]s
 		values[field.Key] = value
 	}
 	return values, nil
-}
-
-func contains(values []string, target string) bool {
-	for _, value := range values {
-		if value == target {
-			return true
-		}
-	}
-	return false
 }
 
 func executeTaskCLI(workspace string, item task.Task, values map[string]string, options taskRunOptions, stdout, stderr io.Writer) error {

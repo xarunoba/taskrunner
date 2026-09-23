@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"text/tabwriter"
@@ -58,8 +59,7 @@ func executeJobsCLI(workspace string, options jobListOptions, stdout io.Writer) 
 
 func filterJobs(jobs []daemon.Job, options jobListOptions) []daemon.Job {
 	filtered := make([]daemon.Job, 0, len(jobs))
-	for i := len(jobs) - 1; i >= 0; i-- {
-		job := jobs[i]
+	for _, job := range slices.Backward(jobs) {
 		if options.status != "" {
 			if job.Status != options.status {
 				continue
@@ -247,7 +247,7 @@ func executeJobPruneCLI(client *daemon.Client, options jobPruneOptions, stdin io
 	if err != nil {
 		return fmt.Errorf("list jobs: %w", err)
 	}
-	cutoff := time.Time{}
+	var cutoff time.Time
 	if options.before > 0 {
 		cutoff = time.Now().Add(-options.before)
 	}
@@ -349,8 +349,6 @@ const (
 	jobRerun
 	jobRemove
 )
-
-// Execute parses args and runs the selected command.
 
 func (a *cliApp) newJobsCommand() *cobra.Command {
 	var (

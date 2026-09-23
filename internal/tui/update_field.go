@@ -23,50 +23,15 @@ func (m model) updateFieldForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.moveFieldFocus(-1)
 			return m, m.focusFieldControl()
 		case "left", "h":
-			if m.fieldFocus == 2 {
-				m.fieldTypeCursor = (m.fieldTypeCursor + len(fieldTypes) - 1) % len(fieldTypes)
-				return m, nil
-			}
-			if m.fieldFocus == 3 && fieldTypes[m.fieldTypeCursor] == task.FieldRefer {
-				if keys := m.referSourceKeys(); len(keys) > 0 {
-					m.fieldFromCursor = (m.fieldFromCursor + len(keys) - 1) % len(keys)
-				}
-				return m, nil
-			}
-			if m.fieldFocus == 4 {
-				m.fieldRaw = !m.fieldRaw
-				return m, nil
-			}
-			if m.fieldFocus == 7 {
-				m.fieldOptional = !m.fieldOptional
+			if m.updateFieldPicker(-1) {
 				return m, nil
 			}
 		case "right", "l":
-			if m.fieldFocus == 2 {
-				m.fieldTypeCursor = (m.fieldTypeCursor + 1) % len(fieldTypes)
-				return m, nil
-			}
-			if m.fieldFocus == 3 && fieldTypes[m.fieldTypeCursor] == task.FieldRefer {
-				if keys := m.referSourceKeys(); len(keys) > 0 {
-					m.fieldFromCursor = (m.fieldFromCursor + 1) % len(keys)
-				}
-				return m, nil
-			}
-			if m.fieldFocus == 4 {
-				m.fieldRaw = !m.fieldRaw
-				return m, nil
-			}
-			if m.fieldFocus == 7 {
-				m.fieldOptional = !m.fieldOptional
+			if m.updateFieldPicker(1) {
 				return m, nil
 			}
 		case " ":
-			if m.fieldFocus == 4 {
-				m.fieldRaw = !m.fieldRaw
-				return m, nil
-			}
-			if m.fieldFocus == 7 {
-				m.fieldOptional = !m.fieldOptional
+			if m.updateFieldPicker(0) {
 				return m, nil
 			}
 		}
@@ -79,6 +44,34 @@ func (m model) updateFieldForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	m.fieldInputs[inputIndex], cmd = m.fieldInputs[inputIndex].Update(msg)
 	return m, cmd
+}
+
+func (m *model) updateFieldPicker(direction int) bool {
+	switch m.fieldFocus {
+	case 2:
+		if direction == 0 {
+			return false
+		}
+		m.fieldTypeCursor = (m.fieldTypeCursor + direction + len(fieldTypes)) % len(fieldTypes)
+		return true
+	case 3:
+		if direction == 0 || fieldTypes[m.fieldTypeCursor] != task.FieldRefer {
+			return false
+		}
+		keys := m.referSourceKeys()
+		if len(keys) > 0 {
+			m.fieldFromCursor = (m.fieldFromCursor + direction + len(keys)) % len(keys)
+		}
+		return true
+	case 4:
+		m.fieldRaw = !m.fieldRaw
+		return true
+	case 7:
+		m.fieldOptional = !m.fieldOptional
+		return true
+	default:
+		return false
+	}
 }
 
 // fieldInputForFocus maps a field form focus row to its text input. Focus

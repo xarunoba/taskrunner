@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -37,13 +38,14 @@ func (m model) updateMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	if event.Action != tea.MouseActionPress || event.Button != tea.MouseButtonLeft {
 		return m, nil
 	}
-	if screen, ok := m.topLevelTabAt(event.Y, event.X); ok {
+	lines := strings.Split(ansi.Strip(m.View()), "\n")
+	if screen, ok := topLevelTabAt(lines, event.Y, event.X); ok {
 		m.switchTab(screen)
 		return m, nil
 	}
 
-	line := m.mouseLine(event.Y)
-	if !m.helpOpen && m.mouseLineIsLastMatch(event.Y, helpChipText) {
+	line := mouseLine(lines, event.Y)
+	if !m.helpOpen && mouseLineIsLastMatch(lines, event.Y, helpChipText) {
 		if start, end := m.helpChipColumns(); event.X >= start && event.X < end {
 			m.openHelp()
 			return m, nil
@@ -57,16 +59,15 @@ func (m model) updateMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	case screenRun:
 		return m.clickRunForm(line, event.X)
 	case screenJobs:
-		return m.clickJobs(line, event.X)
+		return m.clickJobs(line)
 	case screenResult:
 		return m, nil
 	default:
-		return m.clickTaskList(line, event.X)
+		return m.clickTaskList(line)
 	}
 }
 
-func (m model) mouseLine(y int) string {
-	lines := strings.Split(ansi.Strip(m.View()), "\n")
+func mouseLine(lines []string, y int) string {
 	if y < 0 || y >= len(lines) {
 		return ""
 	}
@@ -80,10 +81,9 @@ func (m model) mouseLine(y int) string {
 	return strings.TrimSpace(line)
 }
 
-func (m model) mouseLineIsLastMatch(y int, text string) bool {
-	lines := strings.Split(ansi.Strip(m.View()), "\n")
-	for i := len(lines) - 1; i >= 0; i-- {
-		if strings.Contains(lines[i], text) {
+func mouseLineIsLastMatch(lines []string, y int, text string) bool {
+	for i, line := range slices.Backward(lines) {
+		if strings.Contains(line, text) {
 			return y == i
 		}
 	}
@@ -100,7 +100,7 @@ func (m model) helpChipColumns() (int, int) {
 	return start, end
 }
 
-func (m model) clickTaskList(line string, x int) (tea.Model, tea.Cmd) {
+func (m model) clickTaskList(line string) (tea.Model, tea.Cmd) {
 	for i, item := range m.tasks {
 		row := item.Name + m.taskActivity(item.File)
 		if line == row || line == "› "+row {
@@ -111,7 +111,7 @@ func (m model) clickTaskList(line string, x int) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m model) clickJobs(line string, x int) (tea.Model, tea.Cmd) {
+func (m model) clickJobs(line string) (tea.Model, tea.Cmd) {
 	for i := range m.jobs {
 		job := m.jobs[len(m.jobs)-1-i]
 		row := fmt.Sprintf("%-9s %s  %s", strings.ToUpper(string(job.Status)), job.Name, job.ShortID())
@@ -130,12 +130,8 @@ func (m model) clickJobs(line string, x int) (tea.Model, tea.Cmd) {
 // padded "Tasks" and "Jobs" tab labels and their separator.
 var tabRegionWidth = lipgloss.Width("╭─ ") + lipgloss.Width(" Tasks ") + 1 + lipgloss.Width(" Jobs ")
 
-func (m model) topLevelTabAt(y, x int) (screen, bool) {
-	if y != 0 {
-		return 0, false
-	}
-	lines := strings.Split(ansi.Strip(m.View()), "\n")
-	if len(lines) == 0 {
+func topLevelTabAt(lines []string, y, x int) (screen, bool) {
+	if y != 0 || len(lines) == 0 {
 		return 0, false
 	}
 	// Compare in terminal columns: rune offsets match columns here, byte
@@ -236,11 +232,7 @@ func (m model) clickFieldForm(line string, x int) (tea.Model, tea.Cmd) {
 	case line == "Requirement":
 		m.fieldFocus = 7
 	default:
-		typeNames := make([]string, len(fieldTypes))
-		for i, fieldType := range fieldTypes {
-			typeNames[i] = string(fieldType)
-		}
-		if selected := optionAtX(line, x-3, typeNames); selected >= 0 {
+		if selected := optionAtX(line, x-3, fieldTypeLabels); selected >= 0 {
 			m.fieldFocus = 2
 			m.fieldTypeCursor = selected
 		} else if selected := optionAtX(line, x-3, []string{"Argument", "Raw"}); selected >= 0 {
@@ -305,11 +297,13 @@ func containsValueLine(text, value string) bool {
 
 func optionAtX(line string, x int, options []string) int {
 	for i, option := range options {
-		start := strings.Index(line, option)
-		if start < 0 {
+		before, _, ok := strings.Cut(line, option)
+		if !ok {
 			continue
 		}
-		if x >= start-2 && x <= start+len(option)+2 {
+		startColumn := ansi.StringWidth(before)
+		endColumn := startColumn + ansi.StringWidth(option)
+		if x >= startColumn-2 && x <= endColumn+2 {
 			return i
 		}
 	}

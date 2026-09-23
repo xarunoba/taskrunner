@@ -22,8 +22,7 @@ func (t Task) Validate() error {
 		return fmt.Errorf("unknown job policy %q", t.JobPolicy)
 	}
 
-	keys := make(map[string]struct{}, len(t.Fields))
-	declared := make(map[string]Field, len(t.Fields))
+	declared := make(map[string]struct{}, len(t.Fields))
 	for i, field := range t.Fields {
 		if !fieldKeyPattern.MatchString(field.Key) {
 			return fmt.Errorf("field %d key must start with a letter and contain only letters, numbers, or underscores", i+1)
@@ -31,10 +30,9 @@ func (t Task) Validate() error {
 		if strings.TrimSpace(field.Label) == "" {
 			return fmt.Errorf("field %q requires a label", field.Key)
 		}
-		if _, exists := keys[field.Key]; exists {
+		if _, exists := declared[field.Key]; exists {
 			return fmt.Errorf("field key %q is duplicated", field.Key)
 		}
-		keys[field.Key] = struct{}{}
 
 		switch field.Type {
 		case FieldText, FieldFile, FieldConfirm:
@@ -66,7 +64,7 @@ func (t Task) Validate() error {
 		default:
 			return fmt.Errorf("field %q has unknown type %q", field.Key, field.Type)
 		}
-		declared[field.Key] = field
+		declared[field.Key] = struct{}{}
 	}
 	return nil
 }

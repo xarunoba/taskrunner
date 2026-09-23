@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"sort"
 	"time"
+
+	"github.com/xarunoba/taskrunner/internal/atomicfile"
 )
 
 const jobHistoryDirectory = "runs"
@@ -66,33 +68,10 @@ func (s *server) persistLocked(record *jobRecord) error {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("create job history: %w", err)
 	}
-	file, err := os.CreateTemp(dir, ".job-*.json")
-	if err != nil {
-		return fmt.Errorf("create temporary job: %w", err)
-	}
-	tempName := file.Name()
-	defer func() {
-		_ = os.Remove(tempName)
-	}()
-
 	job := record.Job
 	job.Output, job.OutputSize = record.output.Slice(0)
-	encoder := json.NewEncoder(file)
-	encoder.SetIndent("", "  ")
-	encoder.SetEscapeHTML(false)
-	if err := encoder.Encode(job); err != nil {
-		_ = file.Close()
-		return fmt.Errorf("encode job: %w", err)
-	}
-	if err := file.Chmod(0o600); err != nil {
-		_ = file.Close()
-		return fmt.Errorf("set job permissions: %w", err)
-	}
-	if err := file.Close(); err != nil {
-		return fmt.Errorf("close job: %w", err)
-	}
 	path := filepath.Join(dir, record.ID+".json")
-	if err := os.Rename(tempName, path); err != nil {
+	if err := atomicfile.WriteJSON(path, 0o600, job); err != nil {
 		return fmt.Errorf("save job: %w", err)
 	}
 	return nil

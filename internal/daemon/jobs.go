@@ -63,15 +63,13 @@ func (s *server) startJobLocked(taskID, name, command string, policy task.JobPol
 	s.sequence++
 	id := strconv.FormatInt(time.Now().UnixNano(), 36) + "-" + strconv.FormatUint(s.sequence, 36)
 	record := &jobRecord{
-		Job: Job{
-			ID:        id,
-			TaskID:    taskID,
-			Name:      name,
-			Command:   command,
-			Policy:    policy,
-			Status:    StatusQueued,
-			CreatedAt: time.Now(),
-		},
+		ID:        id,
+		TaskID:    taskID,
+		Name:      name,
+		Command:   command,
+		Policy:    policy,
+		Status:    StatusQueued,
+		CreatedAt: time.Now(),
 	}
 	s.jobs[id] = record
 	s.order = append(s.order, id)
@@ -147,12 +145,10 @@ func (s *server) startLocked(record *jobRecord) {
 	if err := s.persistLocked(record); err != nil {
 		record.StorageError = err.Error()
 	}
-	s.workers.Add(1)
-	go func() {
-		defer s.workers.Done()
+	s.workers.Go(func() {
 		defer cancel()
 		s.execute(ctx, record)
-	}()
+	})
 }
 
 func (s *server) execute(ctx context.Context, record *jobRecord) {

@@ -161,7 +161,7 @@ func (m model) taskCommandCursorLine() int {
 	lines := strings.Split(m.taskCommandInput.Value(), "\n")
 	current := min(m.taskCommandInput.Line(), len(lines)-1)
 	line := 0
-	for i := 0; i < current; i++ {
+	for i := range current {
 		line += taskCommandLineHeight(lines[i], m.taskCommandInput.Width())
 	}
 	return line + m.taskCommandInput.LineInfo().RowOffset
@@ -190,7 +190,7 @@ func (m model) pickerRow(options []string, selected int) string {
 			separator = 1
 		}
 		if lineWidth > 0 && lineWidth+separator+tokenWidth > m.contentWidth() {
-			body.WriteString("\n")
+			body.WriteByte('\n')
 			lineWidth = 0
 			separator = 0
 		}

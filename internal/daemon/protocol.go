@@ -28,8 +28,8 @@ type Job struct {
 	Error        string         `json:"error,omitempty"`
 	StorageError string         `json:"storage_error,omitempty"`
 	CreatedAt    time.Time      `json:"created_at"`
-	StartedAt    time.Time      `json:"started_at,omitempty"`
-	EndedAt      time.Time      `json:"ended_at,omitempty"`
+	StartedAt    time.Time      `json:"started_at"`
+	EndedAt      time.Time      `json:"ended_at"`
 }
 
 func (j Job) Done() bool {

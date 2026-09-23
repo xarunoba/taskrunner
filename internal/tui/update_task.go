@@ -52,111 +52,11 @@ func (m model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 func (m model) updateTaskForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if key, ok := msg.(tea.KeyMsg); ok {
-		switch key.String() {
-		case "esc":
-			if m.standaloneForm {
-				return m, tea.Quit
-			}
-			m.closeTaskForm()
-			return m, nil
-		case "ctrl+s", "f2":
-			return m.saveTaskForm()
-		case "tab":
-			m.taskFocus = (m.taskFocus + 1) % 4
-			return m, m.focusTaskControl()
-		case "shift+tab":
-			m.taskFocus = (m.taskFocus + 3) % 4
-			return m, m.focusTaskControl()
-		case "up":
-			if m.taskFocus == 2 {
-				break
-			}
-			if m.taskFocus == 1 && m.fieldCursor > 0 {
-				m.fieldCursor--
-				return m, nil
-			}
-			if m.taskFocus > 0 {
-				m.taskFocus--
-				return m, m.focusTaskControl()
-			}
-		case "down":
-			if m.taskFocus == 2 {
-				break
-			}
-			if m.taskFocus == 1 {
-				if m.fieldCursor < len(m.formFields)-1 {
-					m.fieldCursor++
-				}
-				return m, nil
-			}
-			m.taskFocus++
-			return m, m.focusTaskControl()
-		case "enter":
-			if m.taskFocus == 2 {
-				break
-			}
-			if m.taskFocus == 1 {
-				if len(m.formFields) == 0 {
-					m.openFieldForm(-1)
-				} else {
-					m.openFieldForm(m.fieldCursor)
-				}
-				return m, nil
-			}
-			if m.taskFocus < 3 {
-				m.taskFocus++
-				return m, m.focusTaskControl()
-			}
+		updated, cmd, handled := m.updateTaskFormKey(key.String())
+		if handled {
+			return updated, cmd
 		}
-
-		if m.taskFocus == 3 {
-			switch key.String() {
-			case "left", "h":
-				m.moveJobPolicy(-1)
-			case "right", "l", " ":
-				m.moveJobPolicy(1)
-			}
-			return m, nil
-		}
-		if m.taskFocus == 1 {
-			switch key.String() {
-			case "k":
-				if m.fieldCursor > 0 {
-					m.fieldCursor--
-				} else {
-					m.taskFocus = 0
-					return m, m.focusTaskControl()
-				}
-			case "j":
-				if m.fieldCursor < len(m.formFields)-1 {
-					m.fieldCursor++
-				}
-			case "a":
-				m.openFieldForm(-1)
-			case "e":
-				if len(m.formFields) > 0 {
-					m.openFieldForm(m.fieldCursor)
-				}
-			case "[":
-				if m.fieldCursor > 0 {
-					m.formFields[m.fieldCursor-1], m.formFields[m.fieldCursor] = m.formFields[m.fieldCursor], m.formFields[m.fieldCursor-1]
-					m.fieldCursor--
-				}
-			case "]":
-				if m.fieldCursor < len(m.formFields)-1 {
-					m.formFields[m.fieldCursor], m.formFields[m.fieldCursor+1] = m.formFields[m.fieldCursor+1], m.formFields[m.fieldCursor]
-					m.fieldCursor++
-				}
-			case "d":
-				if len(m.formFields) > 0 {
-					m.formFields = append(m.formFields[:m.fieldCursor], m.formFields[m.fieldCursor+1:]...)
-					if m.fieldCursor >= len(m.formFields) && m.fieldCursor > 0 {
-						m.fieldCursor--
-					}
-				}
-			}
-			return m, nil
-		}
+		m = updated
 	}
 
 	if m.taskFocus == 1 || m.taskFocus == 3 {
@@ -171,6 +71,130 @@ func (m model) updateTaskForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.resizeTaskForm()
 	}
 	return m, cmd
+}
+
+func (m model) updateTaskFormKey(key string) (model, tea.Cmd, bool) {
+	switch key {
+	case "esc":
+		if m.standaloneForm {
+			return m, tea.Quit, true
+		}
+		m.closeTaskForm()
+		return m, nil, true
+	case "ctrl+s", "f2":
+		updated, cmd := m.saveTaskForm()
+		return updated, cmd, true
+	case "tab":
+		m.taskFocus = (m.taskFocus + 1) % 4
+		return m, m.focusTaskControl(), true
+	case "shift+tab":
+		m.taskFocus = (m.taskFocus + 3) % 4
+		return m, m.focusTaskControl(), true
+	}
+
+	if updated, cmd, handled := m.updateTaskNavigationKey(key); handled {
+		return updated, cmd, true
+	}
+	switch m.taskFocus {
+	case 1:
+		return m.updateTaskFieldsKey(key)
+	case 3:
+		switch key {
+		case "left", "h":
+			m.moveJobPolicy(-1)
+		case "right", "l", " ":
+			m.moveJobPolicy(1)
+		}
+		return m, nil, true
+	default:
+		return m, nil, false
+	}
+}
+
+func (m model) updateTaskNavigationKey(key string) (model, tea.Cmd, bool) {
+	switch key {
+	case "up":
+		if m.taskFocus == 2 {
+			return m, nil, false
+		}
+		if m.taskFocus == 1 && m.fieldCursor > 0 {
+			m.fieldCursor--
+			return m, nil, true
+		}
+		if m.taskFocus > 0 {
+			m.taskFocus--
+			return m, m.focusTaskControl(), true
+		}
+	case "down":
+		if m.taskFocus == 2 {
+			return m, nil, false
+		}
+		if m.taskFocus == 1 {
+			if m.fieldCursor < len(m.formFields)-1 {
+				m.fieldCursor++
+			}
+			return m, nil, true
+		}
+		m.taskFocus++
+		return m, m.focusTaskControl(), true
+	case "enter":
+		if m.taskFocus == 2 {
+			return m, nil, false
+		}
+		if m.taskFocus == 1 {
+			if len(m.formFields) == 0 {
+				m.openFieldForm(-1)
+			} else {
+				m.openFieldForm(m.fieldCursor)
+			}
+			return m, nil, true
+		}
+		if m.taskFocus < 3 {
+			m.taskFocus++
+			return m, m.focusTaskControl(), true
+		}
+	}
+	return m, nil, false
+}
+
+func (m model) updateTaskFieldsKey(key string) (model, tea.Cmd, bool) {
+	switch key {
+	case "k":
+		if m.fieldCursor > 0 {
+			m.fieldCursor--
+		} else {
+			m.taskFocus = 0
+			return m, m.focusTaskControl(), true
+		}
+	case "j":
+		if m.fieldCursor < len(m.formFields)-1 {
+			m.fieldCursor++
+		}
+	case "a":
+		m.openFieldForm(-1)
+	case "e":
+		if len(m.formFields) > 0 {
+			m.openFieldForm(m.fieldCursor)
+		}
+	case "[":
+		if m.fieldCursor > 0 {
+			m.formFields[m.fieldCursor-1], m.formFields[m.fieldCursor] = m.formFields[m.fieldCursor], m.formFields[m.fieldCursor-1]
+			m.fieldCursor--
+		}
+	case "]":
+		if m.fieldCursor < len(m.formFields)-1 {
+			m.formFields[m.fieldCursor], m.formFields[m.fieldCursor+1] = m.formFields[m.fieldCursor+1], m.formFields[m.fieldCursor]
+			m.fieldCursor++
+		}
+	case "d":
+		if len(m.formFields) > 0 {
+			m.formFields = append(m.formFields[:m.fieldCursor], m.formFields[m.fieldCursor+1:]...)
+			if m.fieldCursor >= len(m.formFields) && m.fieldCursor > 0 {
+				m.fieldCursor--
+			}
+		}
+	}
+	return m, nil, true
 }
 
 func (m *model) moveJobPolicy(direction int) {
@@ -225,7 +249,7 @@ func (m *model) focusTaskControl() tea.Cmd {
 	}
 }
 
-func (m model) saveTaskForm() (tea.Model, tea.Cmd) {
+func (m model) saveTaskForm() (model, tea.Cmd) {
 	item := task.Task{
 		Name:      m.taskNameInput.Value(),
 		Command:   m.taskCommandInput.Value(),

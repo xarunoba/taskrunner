@@ -49,9 +49,6 @@ func (m model) View() string {
 
 func titledPanel(panel, title string) string {
 	lines := strings.Split(panel, "\n")
-	if len(lines) == 0 {
-		return panel
-	}
 	width := ansi.StringWidth(lines[0])
 	titleWidth := max(0, width-5)
 	title = ansi.Truncate(accentStyle.Render(title), titleWidth, "…")
@@ -180,10 +177,7 @@ func visibleRange(total, current, limit int) (int, int) {
 	if total <= limit {
 		return 0, total
 	}
-	start := current - limit/2
-	if start < 0 {
-		start = 0
-	}
+	start := max(current-limit/2, 0)
 	if start+limit > total {
 		start = total - limit
 	}

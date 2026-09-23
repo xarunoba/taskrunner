@@ -65,7 +65,6 @@ func newCompletionCommand(root *cobra.Command) *cobra.Command {
 		Short:                 "Generate shell completion source",
 		Args:                  cobra.ExactArgs(1),
 		ValidArgs:             []string{"bash", "zsh", "fish"},
-		ValidArgsFunction:     nil,
 		DisableFlagsInUseLine: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			switch args[0] {

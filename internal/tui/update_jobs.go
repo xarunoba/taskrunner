@@ -105,7 +105,7 @@ func (m model) openJob(id string) tea.Cmd {
 	}
 }
 
-func (m model) jobAction(action, id string) tea.Cmd {
+func (m model) runJobAction(action jobAction, id string) tea.Cmd {
 	client := m.daemon
 	return func() tea.Msg {
 		var (
@@ -113,11 +113,11 @@ func (m model) jobAction(action, id string) tea.Cmd {
 			err error
 		)
 		switch action {
-		case "cancel":
+		case jobActionCancel:
 			job, err = client.Cancel(id)
-		case "rerun":
+		case jobActionRerun:
 			job, err = client.Rerun(id)
-		case "delete":
+		case jobActionDelete:
 			job, err = client.Remove(id)
 		}
 		if err != nil {
@@ -127,15 +127,28 @@ func (m model) jobAction(action, id string) tea.Cmd {
 	}
 }
 
+func jobActionForKey(key string) (jobAction, bool) {
+	switch key {
+	case "c":
+		return jobActionCancel, true
+	case "r":
+		return jobActionRerun, true
+	case "d":
+		return jobActionDelete, true
+	default:
+		return "", false
+	}
+}
+
 func (m *model) applyJobAction(msg jobActionMsg) {
 	switch msg.action {
-	case "rerun":
+	case jobActionRerun:
 		m.jobs = append(m.jobs, msg.job)
 		m.trackedJobs[msg.job.ID] = struct{}{}
 		m.jobCursor = 0
 		m.showScreen(screenJobs)
 		m.setStatus(fmt.Sprintf("Started new job for %s", msg.job.Name))
-	case "delete":
+	case jobActionDelete:
 		for i := range m.jobs {
 			if m.jobs[i].ID != msg.job.ID {
 				continue
@@ -192,13 +205,8 @@ func (m model) updateJobs(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if !ok {
 			break
 		}
-		action := "delete"
-		if key.String() == "c" {
-			action = "cancel"
-		} else if key.String() == "r" {
-			action = "rerun"
-		}
-		return m, m.jobAction(action, job.ID)
+		action, _ := jobActionForKey(key.String())
+		return m, m.runJobAction(action, job.ID)
 	}
 	return m, nil
 }
@@ -226,13 +234,8 @@ func (m model) updateResult(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.result.ID == "" {
 				return m, nil
 			}
-			action := "delete"
-			if key.String() == "c" {
-				action = "cancel"
-			} else if key.String() == "r" {
-				action = "rerun"
-			}
-			return m, m.jobAction(action, m.result.ID)
+			action, _ := jobActionForKey(key.String())
+			return m, m.runJobAction(action, m.result.ID)
 		}
 	}
 	var cmd tea.Cmd

@@ -16,8 +16,7 @@ func Run(store *task.Store, items []task.Task, stdin io.Reader, stdout io.Writer
 
 // Create opens a standalone task creation form.
 func Create(store *task.Store, items []task.Task, stdin io.Reader, stdout io.Writer) error {
-	item := task.Task{}
-	return start(store, items, &item, stdin, stdout)
+	return start(store, items, &task.Task{}, stdin, stdout)
 }
 
 // Edit opens a task in a standalone editing form.

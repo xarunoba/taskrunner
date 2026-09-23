@@ -9,6 +9,8 @@ import (
 	"sort"
 	"strings"
 	"unicode"
+
+	"github.com/xarunoba/taskrunner/internal/atomicfile"
 )
 
 var ErrTaskExists = errors.New("task already exists")
@@ -98,32 +100,8 @@ func (s *Store) Save(item Task, previousFile string) (Task, error) {
 		}
 	}
 
-	file, err := os.CreateTemp(s.dir, ".task-*.json")
-	if err != nil {
-		return Task{}, fmt.Errorf("create temporary task: %w", err)
-	}
-	tempName := file.Name()
-	defer func() {
-		_ = os.Remove(tempName) // The rename below removes this path on success.
-	}()
-
-	encoder := json.NewEncoder(file)
-	encoder.SetIndent("", "  ")
-	encoder.SetEscapeHTML(false)
-	if err := encoder.Encode(item); err != nil {
-		_ = file.Close()
-		return Task{}, fmt.Errorf("encode task: %w", err)
-	}
-	if err := file.Chmod(0o644); err != nil {
-		_ = file.Close()
-		return Task{}, fmt.Errorf("set task permissions: %w", err)
-	}
-	if err := file.Close(); err != nil {
-		return Task{}, fmt.Errorf("close task: %w", err)
-	}
-
 	target := filepath.Join(s.dir, item.File)
-	if err := os.Rename(tempName, target); err != nil {
+	if err := atomicfile.WriteJSON(target, 0o644, item); err != nil {
 		return Task{}, fmt.Errorf("save task: %w", err)
 	}
 	if previousFile != "" && previousFile != item.File {

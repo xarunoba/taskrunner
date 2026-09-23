@@ -18,11 +18,7 @@ func (m model) fieldFormView() string {
 	body.WriteString(m.gap())
 	body.WriteString(taskStepTitle("Type", m.fieldFocus == 2))
 	body.WriteByte('\n')
-	typeNames := make([]string, len(fieldTypes))
-	for i, fieldType := range fieldTypes {
-		typeNames[i] = string(fieldType)
-	}
-	body.WriteString(m.pickerRow(typeNames, m.fieldTypeCursor))
+	body.WriteString(m.pickerRow(fieldTypeLabels, m.fieldTypeCursor))
 	fieldType := fieldTypes[m.fieldTypeCursor]
 	if fieldType == task.FieldChoice {
 		body.WriteString(m.gap())
@@ -49,7 +45,7 @@ func (m model) fieldFormView() string {
 	}
 	body.WriteString(m.pickerRow([]string{"Argument", "Raw"}, interpolation))
 	if m.fieldRaw {
-		body.WriteString("\n")
+		body.WriteByte('\n')
 		body.WriteString(errorStyle.Render("Warning: raw values execute as shell syntax."))
 	}
 	body.WriteString(m.gap())

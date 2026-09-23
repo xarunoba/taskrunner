@@ -224,7 +224,7 @@ func TestTaskLogRightAlignsElapsedTime(t *testing.T) {
 	})
 
 	var header string
-	for _, line := range strings.Split(ansi.Strip(m.View()), "\n") {
+	for line := range strings.SplitSeq(ansi.Strip(m.View()), "\n") {
 		if strings.Contains(line, "Timed task") {
 			header = line
 			break
@@ -281,7 +281,7 @@ func TestWorkspaceHeaderUsesTopBorder(t *testing.T) {
 
 	m.setStatus("Saved")
 	styledView := m.View()
-	styledHeader := strings.Split(styledView, "\n")[0]
+	styledHeader, _, _ := strings.Cut(styledView, "\n")
 	if !strings.Contains(styledHeader, activeTabStyle.Render("Tasks")) ||
 		!strings.Contains(styledHeader, inactiveTabStyle.Render("Jobs")) {
 		t.Fatalf("top border does not render active and inactive tab backgrounds:\n%s", styledHeader)
@@ -1152,8 +1152,7 @@ func TestStandaloneTaskFormQuitsAfterCancelAndSave(t *testing.T) {
 
 	m.taskNameInput.SetValue("Saved task")
 	m.taskCommandInput.SetValue("printf saved")
-	updated, cmd = m.saveTaskForm()
-	m = updated.(model)
+	m, cmd = m.saveTaskForm()
 	if cmd == nil {
 		t.Fatal("standalone save returned no command")
 	}
@@ -1175,9 +1174,9 @@ func TestStandaloneTaskFormQuitsAfterCancelAndSave(t *testing.T) {
 func mouseClickOn(t *testing.T, view, text string) tea.MouseMsg {
 	t.Helper()
 	for y, line := range strings.Split(ansi.Strip(view), "\n") {
-		if x := strings.Index(line, text); x >= 0 {
-			// strings.Index is a byte offset; mouse X is a column.
-			return mouseClickAt(len([]rune(line[:x])), y)
+		if before, _, ok := strings.Cut(line, text); ok {
+			// Mouse X positions use terminal columns, not rune or byte offsets.
+			return mouseClickAt(ansi.StringWidth(before), y)
 		}
 	}
 	t.Fatalf("view does not contain clickable text %q", text)

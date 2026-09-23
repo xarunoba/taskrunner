@@ -105,9 +105,7 @@ func (s *server) serve(listener *net.UnixListener) error {
 		s.handlers++
 		s.lastActivity = time.Now()
 		s.mu.Unlock()
-		s.workers.Add(1)
-		go func() {
-			defer s.workers.Done()
+		s.workers.Go(func() {
 			defer func() {
 				s.mu.Lock()
 				s.handlers--
@@ -115,7 +113,7 @@ func (s *server) serve(listener *net.UnixListener) error {
 				s.mu.Unlock()
 			}()
 			s.handle(conn)
-		}()
+		})
 	}
 }
 

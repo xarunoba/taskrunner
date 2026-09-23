@@ -111,10 +111,7 @@ func formatJobElapsed(job daemon.Job, now time.Time) string {
 	if end.IsZero() {
 		end = now
 	}
-	elapsed := end.Sub(job.StartedAt)
-	if elapsed < 0 {
-		elapsed = 0
-	}
+	elapsed := max(end.Sub(job.StartedAt), 0)
 	return elapsed.Round(time.Millisecond).String()
 }
 

@@ -39,7 +39,6 @@ var (
 	inactiveTabStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("250")).Background(lipgloss.Color("236")).Padding(0, 1)
 	stepStyle           = selectedStyle
 	errorStyle          = lipgloss.NewStyle().Foreground(lipgloss.Color("196"))
-	okStyle             = lipgloss.NewStyle().Foreground(lipgloss.Color("42"))
 	panelStyle          = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(accentColor).Padding(1, 2)
 	statusBarStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("250")).Background(lipgloss.Color("236"))
 	statusBarErrorStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("230")).Background(lipgloss.Color("196")).Bold(true)
@@ -57,6 +56,14 @@ var fieldTypes = []task.FieldType{
 	task.FieldFile,
 	task.FieldConfirm,
 	task.FieldRefer,
+}
+
+var fieldTypeLabels = []string{
+	"text",
+	"choice",
+	"file",
+	"confirm",
+	"refer",
 }
 
 var jobPolicies = []task.JobPolicy{
@@ -87,8 +94,16 @@ type jobOpenedMsg struct {
 	err error
 }
 
+type jobAction string
+
+const (
+	jobActionCancel jobAction = "cancel"
+	jobActionRerun  jobAction = "rerun"
+	jobActionDelete jobAction = "delete"
+)
+
 type jobActionMsg struct {
-	action string
+	action jobAction
 	job    daemon.Job
 	err    error
 }

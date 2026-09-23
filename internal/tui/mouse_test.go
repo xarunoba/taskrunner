@@ -34,13 +34,14 @@ func TestTabClicksHitTabsNotContentOrPath(t *testing.T) {
 		{x: 30, want: 0, hit: false}, // workspace path
 
 	}
+	headerLines := strings.Split(ansi.Strip(m.View()), "\n")
 	for _, tc := range cases {
-		got, ok := m.topLevelTabAt(0, tc.x)
+		got, ok := topLevelTabAt(headerLines, 0, tc.x)
 		if ok != tc.hit || (ok && got != tc.want) {
 			t.Fatalf("topLevelTabAt(0, %d) = %d %v, want screen %d hit %v", tc.x, got, ok, tc.want, tc.hit)
 		}
 	}
-	if _, ok := m.topLevelTabAt(3, 4); ok {
+	if _, ok := topLevelTabAt(headerLines, 3, 4); ok {
 		t.Fatal("tab hit test matched outside the header row")
 	}
 
@@ -73,5 +74,15 @@ func TestTabClicksHitTabsNotContentOrPath(t *testing.T) {
 	}
 	if m.cursor != 0 {
 		t.Fatalf("clicking the task row set cursor to %d, want 0", m.cursor)
+	}
+}
+
+func TestOptionAtXUsesTerminalColumns(t *testing.T) {
+	t.Parallel()
+
+	line := "› α  [ Beta ]"
+	x := ansi.StringWidth("› α  [ ")
+	if got := optionAtX(line, x, []string{"α", "Beta"}); got != 1 {
+		t.Fatalf("optionAtX() = %d, want 1", got)
 	}
 }

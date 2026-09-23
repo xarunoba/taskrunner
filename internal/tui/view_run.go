@@ -11,7 +11,7 @@ func (m model) runFormView() string {
 	field := m.runTask.Fields[m.runIndex]
 	var body strings.Builder
 	body.WriteString(accentStyle.Render(m.runTask.Name))
-	body.WriteString("\n")
+	body.WriteByte('\n')
 	body.WriteString(mutedStyle.Render(fmt.Sprintf("Field %d of %d", m.runIndex+1, len(m.runTask.Fields))))
 	body.WriteString(m.gap())
 	label := task.ResolveKnownValues(field.Label, m.runValues)

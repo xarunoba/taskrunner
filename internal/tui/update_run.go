@@ -98,96 +98,112 @@ func (m model) updateRunForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 	field := m.runTask.Fields[m.runIndex]
 	switch field.Type {
 	case task.FieldText:
-		if key, ok := msg.(tea.KeyMsg); ok {
-			switch key.String() {
-			case "up":
-				m.moveRunHistory(-1)
-				return m, nil
-			case "down":
-				m.moveRunHistory(1)
-				return m, nil
-			case "enter":
-				value := strings.TrimSpace(m.runInput.Value())
-				if value == "" && !field.Optional {
-					m.setError(fmt.Errorf("%s is required", task.ResolveKnownValues(field.Label, m.runValues)))
-					return m, nil
-				}
-				m.runValues[field.Key] = value
-				return m.advanceRun()
-			}
-		}
-		var cmd tea.Cmd
-		m.runInput, cmd = m.runInput.Update(msg)
-		return m, cmd
+		return m.updateRunText(msg, field)
 	case task.FieldChoice:
-		key, ok := msg.(tea.KeyMsg)
-		if !ok {
-			return m, nil
-		}
-		switch key.String() {
-		case "up", "k":
-			minimum := 0
-			if field.Optional {
-				minimum = -1
-			}
-			if m.choiceCursor > minimum {
-				m.choiceCursor--
-			}
-		case "down", "j":
-			if m.choiceCursor < len(field.Options)-1 {
-				m.choiceCursor++
-			}
-		case "enter":
-			value := ""
-			if m.choiceCursor >= 0 {
-				value = task.ResolveKnownValues(field.Options[m.choiceCursor], m.runValues)
-			}
-			m.runValues[field.Key] = value
-			return m.advanceRun()
-		}
-		return m, nil
+		return m.updateRunChoice(msg, field)
 	case task.FieldFile:
-		if key, ok := msg.(tea.KeyMsg); ok && key.String() == "s" && field.Optional {
-			m.runValues[field.Key] = ""
-			return m.advanceRun()
-		}
-		var cmd tea.Cmd
-		m.filePicker, cmd = m.filePicker.Update(msg)
-		if selected, path := m.filePicker.DidSelectFile(msg); selected {
-			m.runValues[field.Key] = path
-			return m.advanceRun()
-		}
-		if disabled, path := m.filePicker.DidSelectDisabledFile(msg); disabled {
-			m.setError(fmt.Errorf("cannot select %s", path))
-		}
-		return m, cmd
+		return m.updateRunFile(msg, field)
 	case task.FieldConfirm:
-		key, ok := msg.(tea.KeyMsg)
-		if !ok {
-			return m, nil
-		}
-		switch key.String() {
-		case "left", "right", "h", "l", "tab":
-			m.confirmationYes = !m.confirmationYes
-		case "y":
-			m.confirmationYes = true
-		case "n":
-			m.confirmationYes = false
-		case "enter":
-			if !m.confirmationYes && !field.Optional {
-				m.showScreen(screenList)
-				m.setStatus(fmt.Sprintf("Cancelled %s", m.runTask.Name))
-				return m, nil
-			}
-			m.runValues[field.Key] = strconv.FormatBool(m.confirmationYes)
-			return m.advanceRun()
-		}
-		return m, nil
+		return m.updateRunConfirm(msg, field)
 	default:
 		m.showScreen(screenList)
 		m.setError(fmt.Errorf("unknown field type %q", field.Type))
 		return m, nil
 	}
+}
+
+func (m model) updateRunText(msg tea.Msg, field task.Field) (tea.Model, tea.Cmd) {
+	if key, ok := msg.(tea.KeyMsg); ok {
+		switch key.String() {
+		case "up":
+			m.moveRunHistory(-1)
+			return m, nil
+		case "down":
+			m.moveRunHistory(1)
+			return m, nil
+		case "enter":
+			value := strings.TrimSpace(m.runInput.Value())
+			if value == "" && !field.Optional {
+				m.setError(fmt.Errorf("%s is required", task.ResolveKnownValues(field.Label, m.runValues)))
+				return m, nil
+			}
+			m.runValues[field.Key] = value
+			return m.advanceRun()
+		}
+	}
+	var cmd tea.Cmd
+	m.runInput, cmd = m.runInput.Update(msg)
+	return m, cmd
+}
+
+func (m model) updateRunChoice(msg tea.Msg, field task.Field) (tea.Model, tea.Cmd) {
+	key, ok := msg.(tea.KeyMsg)
+	if !ok {
+		return m, nil
+	}
+	switch key.String() {
+	case "up", "k":
+		minimum := 0
+		if field.Optional {
+			minimum = -1
+		}
+		if m.choiceCursor > minimum {
+			m.choiceCursor--
+		}
+	case "down", "j":
+		if m.choiceCursor < len(field.Options)-1 {
+			m.choiceCursor++
+		}
+	case "enter":
+		value := ""
+		if m.choiceCursor >= 0 {
+			value = task.ResolveKnownValues(field.Options[m.choiceCursor], m.runValues)
+		}
+		m.runValues[field.Key] = value
+		return m.advanceRun()
+	}
+	return m, nil
+}
+
+func (m model) updateRunFile(msg tea.Msg, field task.Field) (tea.Model, tea.Cmd) {
+	if key, ok := msg.(tea.KeyMsg); ok && key.String() == "s" && field.Optional {
+		m.runValues[field.Key] = ""
+		return m.advanceRun()
+	}
+	var cmd tea.Cmd
+	m.filePicker, cmd = m.filePicker.Update(msg)
+	if selected, path := m.filePicker.DidSelectFile(msg); selected {
+		m.runValues[field.Key] = path
+		return m.advanceRun()
+	}
+	if disabled, path := m.filePicker.DidSelectDisabledFile(msg); disabled {
+		m.setError(fmt.Errorf("cannot select %s", path))
+	}
+	return m, cmd
+}
+
+func (m model) updateRunConfirm(msg tea.Msg, field task.Field) (tea.Model, tea.Cmd) {
+	key, ok := msg.(tea.KeyMsg)
+	if !ok {
+		return m, nil
+	}
+	switch key.String() {
+	case "left", "right", "h", "l", "tab":
+		m.confirmationYes = !m.confirmationYes
+	case "y":
+		m.confirmationYes = true
+	case "n":
+		m.confirmationYes = false
+	case "enter":
+		if !m.confirmationYes && !field.Optional {
+			m.showScreen(screenList)
+			m.setStatus(fmt.Sprintf("Cancelled %s", m.runTask.Name))
+			return m, nil
+		}
+		m.runValues[field.Key] = strconv.FormatBool(m.confirmationYes)
+		return m.advanceRun()
+	}
+	return m, nil
 }
 
 func (m *model) moveRunHistory(direction int) {
