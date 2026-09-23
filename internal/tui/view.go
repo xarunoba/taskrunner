@@ -48,7 +48,7 @@ func (m model) footerControls() string {
 	if !m.canGoBack() {
 		return settings + " " + help
 	}
-	return settings + " " + m.styles.helpChip.Render(backChipText) + " " + help
+	return m.styles.helpChip.Render(backChipText) + " " + settings + " " + help
 }
 
 func (m model) View() string {

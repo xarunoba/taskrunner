@@ -346,8 +346,9 @@ func TestFooterShowsContextualControls(t *testing.T) {
 	if strings.Contains(footer, backChipText) {
 		t.Fatalf("Tasks home footer contains %q:\n%s", backChipText, footer)
 	}
-	if strings.Contains(footer, settingsChipText+" "+backChipText) && strings.Index(footer, settingsChipText) > strings.Index(footer, helpChipText) {
-		t.Fatalf("settings chip is not the first footer control:\n%s", footer)
+	if strings.Contains(footer, backChipText) &&
+		strings.Index(footer, backChipText) > strings.Index(footer, settingsChipText) {
+		t.Fatalf("back chip is not left of the settings chip:\n%s", footer)
 	}
 	for _, text := range []string{"enter run", "n new", "e edit", "d delete", "tab switch", "q quit"} {
 		if strings.Contains(footer, text) {

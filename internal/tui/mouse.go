@@ -127,10 +127,6 @@ func (m model) settingsChipColumns() (int, int) {
 	}
 	helpStart, _ := m.helpChipColumns()
 	end := helpStart - 1
-	if m.canGoBack() {
-		backStart, _, _ := m.backChipColumns()
-		end = backStart - 1
-	}
 	start := max(1, end-m.settingsChipWidth())
 	return start, end
 }
@@ -149,8 +145,8 @@ func (m model) backChipColumns() (int, int, bool) {
 	if !m.canGoBack() {
 		return 0, 0, false
 	}
-	helpStart, _ := m.helpChipColumns()
-	end := helpStart - 1
+	settingsStart, _ := m.settingsChipColumns()
+	end := settingsStart - 1
 	start := max(1, end-m.backChipWidth())
 	return start, end, true
 }
