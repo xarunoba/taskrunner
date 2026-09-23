@@ -1,6 +1,6 @@
 # Taskrunner
 
-Taskrunner runs workspace-specific shell commands from a terminal UI or direct CLI commands. Each task is a readable JSON file under `.taskrunner/tasks/`.
+Taskrunner runs workspace-specific shell commands from a terminal UI or direct CLI commands. Create tasks once with prompts (text, choice, file picker, confirmation), then run them interactively or from scripts, with live logs and a background daemon so jobs keep running after you close the terminal.
 
 ## Requirements
 
@@ -45,6 +45,8 @@ Run `taskrunner` without arguments to open the **Tasks** tab. Press `?` for keyb
 
 ### Task editor
 
+The editor walks you through the command, an optional job policy, and any prompt fields; fields can reference earlier answers (for example a confirmation label like `Deploy {{version}} to {{environment}}?`).
+
 | Input | Action |
 | --- | --- |
 | `↑` / `↓` | Move between sections; move between lines in the command editor |
@@ -56,15 +58,7 @@ Run `taskrunner` without arguments to open the **Tasks** tab. Press `?` for keyb
 | `F2` or `Ctrl+S` | Save the task |
 | `Esc` | Cancel |
 
-Fields run in their displayed order. A field can be required or optional and can use safe argument interpolation or raw shell interpolation.
-
-Labels and choice options can reference values collected by earlier fields:
-
-```text
-Deploy {{version}} to {{environment}}?
-```
-
-Taskrunner replaces placeholders with collected values. A placeholder without a collected value remains unchanged.
+Fields run in their displayed order and can be required or optional. Field values are shell-quoted before substitution, so spaces and special characters stay part of one argument.
 
 ### Running a task
 
@@ -76,21 +70,13 @@ Taskrunner replaces placeholders with collected values. A placeholder without a 
 | `s` | Skip an optional file field |
 | `Esc` | Cancel the run |
 
-Moving backward preserves values already entered. Optional text fields accept an empty value, optional choices include a **Skip** entry, and optional confirmations use `false` when **No** is selected.
-
-Taskrunner records non-empty text values when a task starts, per task and field under `.taskrunner/history/`; each field keeps its 100 newest unique values.
+Moving backward preserves values already entered. Recent values per field are remembered, so repeated runs pick up where you left off.
 
 ### Jobs and logs
 
-Taskrunner starts a workspace daemon on demand, so a job continues after the TUI closes. The daemon exits after 10 seconds with no clients and no queued or running jobs.
+Taskrunner starts a workspace daemon on demand, so a job continues after the TUI closes. Each task has one of three job policies: **Sequential** (default; queues new jobs until older ones finish), **Parallel** (starts every job immediately), or **Cancel previous** (cancels older jobs, then starts the new one).
 
-Each task has one of three job policies:
-
-- **Sequential** queues a new job until older jobs for the same task finish. This is the default.
-- **Parallel** starts every job immediately.
-- **Cancel previous** cancels queued and running older jobs for the same task, then starts the new job.
-
-The **Tasks** tab marks running and queued jobs and shows the latest result for idle tasks. The **Jobs** tab lists every job with its status, command, timestamps, and combined output and error log.
+The **Tasks** tab marks running and queued jobs and shows the latest result for idle tasks. The **Jobs** tab lists every job with its status, command, timestamps, and log.
 
 | Input | Action |
 | --- | --- |
@@ -136,8 +122,6 @@ taskrunner completion <bash|zsh|fish>
 
 Every command provides contextual help via `--help` or `taskrunner help <command>`.
 
-`taskrunner create` and `taskrunner edit <task>` open the task editor directly and return to the shell on save or cancel.
-
 ### Run tasks
 
 Run a task and stream its combined standard output and standard error:
@@ -156,36 +140,17 @@ job_id=$(taskrunner run "Deploy" --detach --set environment=staging)
 taskrunner job wait "$job_id"
 ```
 
-Use `--dry-run` to validate values and print the rendered command without creating a job; add `--quiet` to print only the command.
+Use `--dry-run` to validate values and print the rendered command without creating a job.
 
-Task names match case-insensitively by display name, JSON filename, or filename without `.json`. Direct runs require every required field: optional fields default to an empty value, optional confirmations to `false`, required confirmations must be `true`, choice values must match a configured option, and unknown keys are rejected.
+Task names match case-insensitively by display name or filename. Direct runs require every required field; choice values must match a configured option, and unknown keys are rejected.
 
-Quote `key=value` when the value contains whitespace or shell characters:
+### Manage tasks and jobs
 
-```sh
-taskrunner run "Release" --set 'note=release candidate'
-```
-
-### Manage tasks
-
-- `taskrunner tasks` prints task names, files, field counts, policies, and command templates. `--json` emits a JSON array.
-- `taskrunner task show` prints the persisted definition; `--json` emits compact JSON.
-- `taskrunner task validate` validates one task or every task; no output means success.
-- `taskrunner task rm` removes only the task definition. Interactive removal requires confirmation; scripts must pass `--force`.
-
-### Manage jobs
-
-`taskrunner jobs` lists queued and running jobs, newest first. `--all` includes completed jobs; `--status`, `--task`, and `--limit` filter matches; `--json` emits a JSON array; `--quiet` prints one full job ID per line.
-
-Job arguments accept a full ID or a unique prefix or suffix, including the short ID printed by the table.
-
-- `taskrunner job logs` prints combined output; `--tail` selects the final lines, `--follow` (`-f`) streams until the job finishes and exits with its result.
-- `taskrunner job wait` exits with the job result without printing logs.
-- `taskrunner job inspect` prints full details; `--json` for machine-readable output.
-- `taskrunner job cancel` accepts queued or running jobs.
-- `taskrunner job rerun` starts a new job with the original command and policy.
-- `taskrunner job rm` removes a completed job and its output; active jobs must be canceled first.
-- `taskrunner job prune` removes matching completed jobs; `--status` limits to one completed status, `--before` accepts durations such as `24h` or `7d`. Interactive pruning requires confirmation; scripts must pass `--force`.
+- `taskrunner tasks` lists tasks; `taskrunner task show` prints one task; `taskrunner task validate` checks one task or every task; `taskrunner task rm` removes a task.
+- `taskrunner jobs` lists jobs (newest first) with `--status`, `--task`, `--limit`, and `--json`/`--quiet` filters.
+- Job arguments accept a full ID or a unique prefix or suffix, including the short ID printed by the table.
+- `taskrunner job logs --follow` streams a job until it finishes; `taskrunner job wait` exits with the job result.
+- `taskrunner job cancel`, `rerun`, `rm`, and `prune` manage the job list. Interactive removal and pruning ask for confirmation; scripts pass `--force`.
 
 ### Shell completion
 
@@ -197,15 +162,9 @@ taskrunner completion zsh
 taskrunner completion fish
 ```
 
-## Task files
+## Tasks
 
-Taskrunner stores one JSON file per task:
-
-```text
-<workspace>/.taskrunner/tasks/<task-name>.json
-```
-
-Example:
+Tasks live in `.taskrunner/` inside the workspace, one JSON file per task. You normally never edit them by hand: `taskrunner create` and `taskrunner edit` open a guided editor, and `taskrunner task show <task>` prints the current definition. A task is a command with `{{placeholders}}` plus the fields that fill them in:
 
 ```json
 {
@@ -213,73 +172,16 @@ Example:
   "command": "deploy --environment {{environment}} --version {{version}}",
   "job_policy": "parallel",
   "fields": [
-    {
-      "key": "environment",
-      "label": "Environment",
-      "type": "choice",
-      "options": [
-        "staging",
-        "production"
-      ]
-    },
-    {
-      "key": "version",
-      "label": "Version",
-      "type": "text"
-    },
-    {
-      "key": "confirmed",
-      "label": "Deploy {{version}} to {{environment}}?",
-      "type": "confirm"
-    }
+    { "key": "environment", "label": "Environment", "type": "choice", "options": ["staging", "production"] },
+    { "key": "version", "label": "Version", "type": "text" },
+    { "key": "confirmed", "label": "Deploy {{version}} to {{environment}}?", "type": "confirm" }
   ]
 }
 ```
 
-Fields are evaluated in JSON order. Tasks without fields run immediately. `job_policy` is optional and accepts `"parallel"` or `"cancel_previous"`; omission means sequential.
+To share a task, copy its JSON file into `.taskrunner/tasks/` in another workspace. Every task is validated when loaded, and malformed files are reported by filename.
 
-| Property | Required | Description |
-| --- | --- | --- |
-| `key` | Yes | Unique placeholder key. Starts with a letter and contains only letters, numbers, or underscores. |
-| `label` | Yes | Prompt displayed at runtime. |
-| `type` | Yes | `text`, `choice`, `file`, `confirm`, or `refer`. |
-| `options` | For `choice` | Allowed choice values. |
-| `from` | For `refer` | Earlier field whose value and presence this field mirrors. |
-| `prefix` | No | Text inserted before the value. Keeps leading and trailing whitespace. |
-| `suffix` | No | Text inserted after the value. Keeps leading and trailing whitespace. |
-| `optional` | No | Allows the field to be skipped. Defaults to `false`. |
-| `raw` | No | Inserts the value as shell syntax instead of quoting it. Defaults to `false`. |
-
-A field's placeholder is replaced by `prefix` + value + `suffix` when the field has a value, and is removed from the command when it does not. Empty optional values and declined optional confirmations contribute nothing, so optional flags must live in `prefix` (write `--tag {{tag}}` as `{{tag}}` with `"prefix": "--tag "`). Confirm fields never insert their value: on Yes the placeholder becomes exactly `prefix` + `suffix`, which turns a confirm into a flag such as `"prefix": "--force"`.
-
-Fields whose placeholder does not appear in the command inject nothing and only gate execution: a required field must still be supplied or confirmed before the task runs.
-
-`refer` fields are never prompted. They mirror the presence and value of the earlier field named by `from`, wrapped in their own `prefix`, `suffix`, and `raw` settings, so one answer can drive several command flags:
-
-```json
-{ "key": "db", "label": "Database", "type": "text", "optional": true, "prefix": "--db " },
-{ "key": "confirmDb", "label": "Confirm DB", "type": "refer", "from": "db", "prefix": "--confirm " }
-```
-
-`--db {{db}} --confirm {{confirmDb}}` renders both fragments when a database is given and neither when it is left empty. A refer field whose `from` names a confirm contributes no value: it renders its `prefix` + `suffix` only when the confirmation is Yes.
-
-`file` fields show a workspace-rooted file picker. Selecting a file inserts its absolute path, shell-quoted, as a single command argument; only files can be selected, and hidden files are shown.
-
-Taskrunner shell-quotes field values before replacing command placeholders, so spaces, quotes, pipes, and substitutions remain part of one argument. A `raw: true` field bypasses quoting and executes as shell syntax; `prefix` and `suffix` are always literal text and are never quoted. Use raw fields only with trusted task files and input. The TUI marks raw fields and displays a warning before execution.
-
-## Workspace data
-
-| Path | Contents |
-| --- | --- |
-| `.taskrunner/tasks/` | Task definitions |
-| `.taskrunner/history/` | Runtime text-field history |
-| `.taskrunner/runs/` | One persisted JSON record and log per job |
-| `.taskrunner/daemon.sock` | Active daemon IPC socket |
-| `.taskrunner/daemon.lock` | Workspace daemon lock |
-
-Taskrunner generates task filenames, rejects paths outside `.taskrunner/tasks/`, and writes all files through temporary files and atomic renames. History and job files use owner-only permissions.
-
-To share a task, copy its JSON file into `.taskrunner/tasks/` in another workspace. Taskrunner validates every task when loading it and reports the filename of malformed input.
+Field values are shell-quoted before substitution, so task files cannot accidentally inject shell syntax. A field can deliberately opt out for trusted shell snippets; the TUI marks such fields and warns before execution.
 
 ## Development
 
