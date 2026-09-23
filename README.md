@@ -5,6 +5,7 @@ Taskrunner runs workspace-specific shell commands from a terminal UI or direct C
 ## Requirements
 
 - Go 1.27 or newer
+- Linux: the job daemon communicates over a Unix domain socket
 
 Taskrunner executes commands through `$SHELL -c`. It uses `/bin/sh` when `$SHELL` is empty.
 
@@ -191,6 +192,8 @@ go test ./...
 go vet ./...
 go build ./...
 ```
+
+After changing dependencies, update `THIRD_PARTY_NOTICES` by hand with the new component's version and copyright lines. CI checks dependency licenses with [go-licenses](https://github.com/google/go-licenses).
 
 Run TUI changes in a PTY. Check narrow and short terminals as well as wide and tall terminals.
 

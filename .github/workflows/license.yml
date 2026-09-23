@@ -1,0 +1,27 @@
+name: License check
+
+on:
+  pull_request:
+    paths:
+      - go.mod
+      - go.sum
+  push:
+    branches: [main]
+    paths:
+      - go.mod
+      - go.sum
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Check dependency licenses
+        run: go run github.com/google/go-licenses@v1.6.0 check ./...
