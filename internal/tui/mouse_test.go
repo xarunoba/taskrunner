@@ -56,6 +56,7 @@ func TestTabClicksHitTabsNotContentOrPath(t *testing.T) {
 	m = updated.(model)
 	updated, _ = m.updateMouse(mouseClickAt(4, 0)) // Tasks tab
 	m = updated.(model)
+	m.cursor = 1
 	view := strings.Split(ansi.Strip(m.View()), "\n")
 	row := -1
 	for y, line := range view {
@@ -74,6 +75,46 @@ func TestTabClicksHitTabsNotContentOrPath(t *testing.T) {
 	}
 	if m.cursor != 0 {
 		t.Fatalf("clicking the task row set cursor to %d, want 0", m.cursor)
+	}
+}
+
+func TestTaskClickSelectsThenRuns(t *testing.T) {
+	t.Parallel()
+
+	tasks := []task.Task{
+		{Name: "Build", Command: "true"},
+		{
+			Name:    "Deploy",
+			Command: "deploy {{environment}}",
+			Fields: []task.Field{
+				{Key: "environment", Label: "Environment", Type: task.FieldText},
+			},
+		},
+	}
+	m := newModel(task.NewStore(t.TempDir()), tasks)
+	m.resize(80, 24)
+
+	view := strings.Split(ansi.Strip(m.View()), "\n")
+	row := -1
+	for y, line := range view {
+		if strings.Contains(line, "Deploy") {
+			row = y
+			break
+		}
+	}
+	if row < 0 {
+		t.Fatalf("task row not visible:\n%s", m.View())
+	}
+
+	updated, _ := m.updateMouse(mouseClickAt(4, row))
+	m = updated.(model)
+	if m.cursor != 1 || m.screen != screenList {
+		t.Fatalf("first task click produced cursor=%d screen=%d, want cursor=1 screen=%d", m.cursor, m.screen, screenList)
+	}
+	updated, _ = m.updateMouse(mouseClickOn(t, m.View(), "› Deploy"))
+	m = updated.(model)
+	if m.screen != screenRun || m.runTask.Name != "Deploy" {
+		t.Fatalf("second task click produced screen=%d task=%q, want run screen for Deploy", m.screen, m.runTask.Name)
 	}
 }
 

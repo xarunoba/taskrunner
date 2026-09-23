@@ -318,14 +318,17 @@ func TestWorkspaceHeaderUsesTopBorder(t *testing.T) {
 		t.Fatalf("view still contains the taskrunner title:\n%s", view)
 	}
 }
-func TestFooterShowsOnlyTopLevelControls(t *testing.T) {
+func TestFooterShowsContextualControls(t *testing.T) {
 	t.Parallel()
 
 	m := newModel(task.NewStore(t.TempDir()), nil)
 	m.resize(80, 24)
 	footer := ansi.Strip(strings.Split(m.View(), "\n")[m.height-1])
-	if !strings.Contains(footer, "? keybinds") {
-		t.Fatalf("Tasks footer does not contain %q:\n%s", "? keybinds", footer)
+	if !strings.Contains(footer, helpChipText) {
+		t.Fatalf("Tasks footer does not contain %q:\n%s", helpChipText, footer)
+	}
+	if strings.Contains(footer, backChipText) {
+		t.Fatalf("Tasks home footer contains %q:\n%s", backChipText, footer)
 	}
 	for _, text := range []string{"enter run", "n new", "e edit", "d delete", "tab switch", "q quit"} {
 		if strings.Contains(footer, text) {
@@ -335,28 +338,65 @@ func TestFooterShowsOnlyTopLevelControls(t *testing.T) {
 
 	m.openTaskForm(task.Task{})
 	footer = ansi.Strip(strings.Split(m.View(), "\n")[m.height-1])
-	if !strings.Contains(footer, "? keybinds") {
-		t.Fatalf("text-input footer does not contain %q:\n%s", "? keybinds", footer)
+	for _, text := range []string{backChipText, helpChipText} {
+		if !strings.Contains(footer, text) {
+			t.Fatalf("task form footer does not contain %q:\n%s", text, footer)
+		}
+	}
+	styledFooter := strings.Split(m.View(), "\n")[m.height-1]
+	if !strings.Contains(styledFooter, helpChipStyle.Render(backChipText)) {
+		t.Fatalf("back chip does not use the footer control style:\n%s", styledFooter)
+	}
+
+	m.showScreen(screenJobs)
+	footer = ansi.Strip(strings.Split(m.View(), "\n")[m.height-1])
+	if strings.Contains(footer, backChipText) {
+		t.Fatalf("Jobs home footer contains %q:\n%s", backChipText, footer)
+	}
+	m.openResult(daemon.Job{})
+	footer = ansi.Strip(strings.Split(m.View(), "\n")[m.height-1])
+	if !strings.Contains(footer, backChipText) {
+		t.Fatalf("job result footer does not contain %q:\n%s", backChipText, footer)
 	}
 }
 
 func TestFooterControlsSupportMouseInput(t *testing.T) {
 	t.Parallel()
 
-	m := newModel(task.NewStore(t.TempDir()), nil)
-	m.resize(80, 24)
+	for _, size := range []struct {
+		width  int
+		height int
+	}{
+		{width: 40, height: 10},
+		{width: 80, height: 24},
+	} {
+		m := newModel(task.NewStore(t.TempDir()), nil)
+		m.resize(size.width, size.height)
 
-	updated, _ := m.updateMouse(mouseClickOn(t, m.View(), "? keybinds"))
-	m = updated.(model)
-	if !m.helpOpen {
-		t.Fatal("clicking keybind footer control did not open help")
-	}
-	m.helpOpen = false
+		updated, _ := m.Update(mouseClickOn(t, m.View(), helpChipText))
+		m = updated.(model)
+		if !m.helpOpen {
+			t.Fatalf("%dx%d: clicking keybind footer control did not open help", size.width, size.height)
+		}
 
-	updated, _ = m.updateMouse(mouseClickAt(m.width-1, m.height-1))
-	m = updated.(model)
-	if m.helpOpen {
-		t.Fatal("clicking the bottom border corner opened help")
+		updated, _ = m.Update(mouseClickOn(t, m.View(), helpChipText))
+		m = updated.(model)
+		if m.helpOpen {
+			t.Fatalf("%dx%d: clicking keybind footer control again did not close help", size.width, size.height)
+		}
+
+		m.openTaskForm(task.Task{})
+		updated, _ = m.Update(mouseClickOn(t, m.View(), backChipText))
+		m = updated.(model)
+		if m.screen != screenList {
+			t.Fatalf("%dx%d: clicking back produced screen %d, want Tasks home", size.width, size.height, m.screen)
+		}
+
+		updated, _ = m.Update(mouseClickAt(m.width-1, m.height-1))
+		m = updated.(model)
+		if m.helpOpen {
+			t.Fatalf("%dx%d: clicking the bottom border corner opened help", size.width, size.height)
+		}
 	}
 }
 

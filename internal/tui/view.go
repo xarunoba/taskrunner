@@ -20,10 +20,29 @@ func scrollBar(height int, scrollable bool, percent float64) string {
 	return strings.Join(lines, "\n")
 }
 
-const helpChipText = "? keybinds"
+const (
+	backChipText = "← back"
+	helpChipText = "? keybinds"
+)
+
+func (m model) canGoBack() bool {
+	return m.screen != topLevelTab(m.screen)
+}
+
+func (m model) backChipWidth() int {
+	return ansi.StringWidth(helpChipStyle.Render(backChipText))
+}
 
 func (m model) helpChipWidth() int {
 	return ansi.StringWidth(helpChipStyle.Render(helpChipText))
+}
+
+func (m model) footerControls() string {
+	help := helpChipStyle.Render(helpChipText)
+	if !m.canGoBack() {
+		return help
+	}
+	return helpChipStyle.Render(backChipText) + " " + help
 }
 
 func (m model) View() string {
@@ -190,12 +209,16 @@ func (m model) statusBar() string {
 		width = 80
 	}
 	inner := max(1, width-2)
-	chip := helpChipStyle.Render(helpChipText)
-	chipWidth := m.helpChipWidth()
-	message := ansi.Truncate(m.status, max(1, inner-chipWidth-1), "…")
-	line := " " + message
-	line += strings.Repeat(" ", max(0, inner-chipWidth-ansi.StringWidth(line)))
-	line += chip
+	controls := m.footerControls()
+	controlsWidth := ansi.StringWidth(controls)
+	messageWidth := max(0, inner-controlsWidth-1)
+	message := ansi.Truncate(m.status, messageWidth, "…")
+	line := ""
+	if messageWidth > 0 {
+		line = " " + message
+	}
+	line += strings.Repeat(" ", max(0, inner-controlsWidth-ansi.StringWidth(line)))
+	line += controls
 	line = ansi.Truncate(line, inner, "")
 	line += strings.Repeat(" ", max(0, inner-ansi.StringWidth(line)))
 	style := statusBarStyle

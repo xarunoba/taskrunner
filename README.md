@@ -28,7 +28,7 @@ taskrunner
 
 ## TUI
 
-Run `taskrunner` without arguments to open the **Tasks** tab. Press `?` for keybinds on the current screen; while editing text, use `F1` for help and `Ctrl+C` to quit.
+Run `taskrunner` without arguments to open the **Tasks** tab. Press `?` for keybinds on the current screen; while editing text, use `F1` for help and `Ctrl+C` to quit. The footer shows **Back** outside each tab's home screen. Click **Back** to return or **? keybinds** to toggle help.
 
 ### Tasks
 
@@ -41,7 +41,7 @@ Run `taskrunner` without arguments to open the **Tasks** tab. Press `?` for keyb
 | `e` | Edit the selected task |
 | `d` | Delete the selected task |
 | `q` | Quit |
-| Mouse | Select a task or control; wheel moves through the active control |
+| Mouse | Select a task or control; click the selected task to run it; wheel moves through the active control |
 
 ### Task editor
 

@@ -14,6 +14,9 @@ import (
 func (m model) updateMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	event := tea.MouseEvent(msg)
 	if event.IsWheel() {
+		if m.helpOpen {
+			return m.updateHelp(msg)
+		}
 		if m.screen == screenResult {
 			return m.updateResult(msg)
 		}
@@ -39,18 +42,30 @@ func (m model) updateMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	lines := strings.Split(ansi.Strip(m.View()), "\n")
+	if mouseLineIsLastMatch(lines, event.Y, helpChipText) {
+		if start, end := m.helpChipColumns(); event.X >= start && event.X < end {
+			if m.helpOpen {
+				m.helpOpen = false
+			} else {
+				m.openHelp()
+			}
+			return m, nil
+		}
+	}
+	if m.helpOpen {
+		return m, nil
+	}
+	if mouseLineIsLastMatch(lines, event.Y, backChipText) {
+		if start, end, ok := m.backChipColumns(); ok && event.X >= start && event.X < end {
+			return m.goBack()
+		}
+	}
 	if screen, ok := topLevelTabAt(lines, event.Y, event.X); ok {
 		m.switchTab(screen)
 		return m, nil
 	}
 
 	line := mouseLine(lines, event.Y)
-	if !m.helpOpen && mouseLineIsLastMatch(lines, event.Y, helpChipText) {
-		if start, end := m.helpChipColumns(); event.X >= start && event.X < end {
-			m.openHelp()
-			return m, nil
-		}
-	}
 	switch m.screen {
 	case screenTask:
 		return m.clickTaskForm(line, event.X)
@@ -100,13 +115,43 @@ func (m model) helpChipColumns() (int, int) {
 	return start, end
 }
 
+func (m model) backChipColumns() (int, int, bool) {
+	if !m.canGoBack() {
+		return 0, 0, false
+	}
+	helpStart, _ := m.helpChipColumns()
+	end := helpStart - 1
+	start := max(1, end-m.backChipWidth())
+	return start, end, true
+}
+
+func (m model) goBack() (tea.Model, tea.Cmd) {
+	key := tea.KeyMsg{Type: tea.KeyEsc}
+	switch m.screen {
+	case screenTask:
+		return m.updateTaskForm(key)
+	case screenField:
+		return m.updateFieldForm(key)
+	case screenRun:
+		return m.updateRunForm(key)
+	case screenResult:
+		return m.updateResult(key)
+	default:
+		return m, nil
+	}
+}
+
 func (m model) clickTaskList(line string) (tea.Model, tea.Cmd) {
 	for i, item := range m.tasks {
 		row := item.Name + m.taskActivity(item.File)
-		if line == row || line == "› "+row {
-			m.cursor = i
-			return m, nil
+		if line != row && line != "› "+row {
+			continue
 		}
+		if m.cursor == i {
+			return m.startRun(item)
+		}
+		m.cursor = i
+		return m, nil
 	}
 	return m, nil
 }

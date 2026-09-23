@@ -35,12 +35,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.applyJobAction(msg)
 		return m, nil
 	case tea.MouseMsg:
-		if m.helpOpen {
-			if tea.MouseEvent(msg).IsWheel() {
-				return m.updateHelp(msg)
-			}
-			return m, nil
-		}
 		return m.updateMouse(msg)
 	case tea.KeyMsg:
 		switch msg.String() {
