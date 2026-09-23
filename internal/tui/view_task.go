@@ -13,27 +13,27 @@ func (m model) listView() string {
 	var body strings.Builder
 
 	if len(m.tasks) == 0 {
-		body.WriteString(mutedStyle.Render("No tasks yet. Press n to create one."))
+		body.WriteString(m.styles.muted.Render("No tasks yet. Press n to create one."))
 	} else {
 		start, end := visibleRange(len(m.tasks), m.cursor, max(1, m.contentHeight()-7))
 		if start > 0 {
-			body.WriteString(mutedStyle.Render(fmt.Sprintf("↑ %d more", start)))
+			body.WriteString(m.styles.muted.Render(fmt.Sprintf("↑ %d more", start)))
 			body.WriteByte('\n')
 		}
 		for i := start; i < end; i++ {
 			item := m.tasks[i]
 			name := "  " + item.Name + m.taskActivity(item.File)
 			if i == m.cursor {
-				name = selectedStyle.Render("› " + item.Name + m.taskActivity(item.File))
+				name = m.styles.selected.Render("› " + item.Name + m.taskActivity(item.File))
 			}
 			body.WriteString(name)
 			body.WriteByte('\n')
 			if i == m.cursor {
 				body.WriteString("  ")
-				body.WriteString(mutedStyle.Render(item.Command))
+				body.WriteString(m.styles.muted.Render(item.Command))
 				body.WriteByte('\n')
 				body.WriteString("  ")
-				body.WriteString(mutedStyle.Render(fmt.Sprintf(
+				body.WriteString(m.styles.muted.Render(fmt.Sprintf(
 					"%d fields • %s",
 					len(item.Fields),
 					jobPolicySummary(item.JobPolicy),
@@ -42,7 +42,7 @@ func (m model) listView() string {
 			}
 		}
 		if end < len(m.tasks) {
-			body.WriteString(mutedStyle.Render(fmt.Sprintf("↓ %d more", len(m.tasks)-end)))
+			body.WriteString(m.styles.muted.Render(fmt.Sprintf("↓ %d more", len(m.tasks)-end)))
 			body.WriteByte('\n')
 		}
 	}
@@ -73,7 +73,7 @@ func (m model) taskFieldLine(index int) string {
 	}
 	line := fmt.Sprintf("%d. %s (%s, %s, %s → %s)", index+1, field.Label, field.Type, requirement, mode, fragment)
 	if m.taskFocus == 1 && index == m.fieldCursor {
-		return selectedStyle.Render("› " + line)
+		return m.styles.selected.Render("› " + line)
 	}
 	return "  " + line
 }
@@ -94,7 +94,7 @@ func (m model) taskFormView() string {
 	view := lipgloss.JoinHorizontal(
 		lipgloss.Top,
 		form.View(),
-		scrollBar(form.Height, lineCount > form.Height, form.ScrollPercent()),
+		m.scrollBar(form.Height, lineCount > form.Height, form.ScrollPercent()),
 	)
 	return m.renderWorkspacePanel(view, screenTask)
 }
@@ -111,19 +111,19 @@ func (m model) taskFormContent() (string, int) {
 	if m.taskFocus == 0 {
 		focusLine = line
 	}
-	write(taskStepTitle("Name", m.taskFocus == 0))
+	write(m.taskStepTitle("Name", m.taskFocus == 0))
 	write("\n")
 	write(m.taskNameInput.View())
 	write(m.gap())
 
-	write(taskStepTitle("Fields", m.taskFocus == 1))
+	write(m.taskStepTitle("Fields", m.taskFocus == 1))
 	write("\n")
 	if len(m.formFields) == 0 {
 		if m.taskFocus == 1 {
 			focusLine = line
-			write(selectedStyle.Render("› No fields. Press a or enter to add one."))
+			write(m.styles.selected.Render("› No fields. Press a or enter to add one."))
 		} else {
-			write(mutedStyle.Render("No fields. Press a or enter to add one."))
+			write(m.styles.muted.Render("No fields. Press a or enter to add one."))
 		}
 	} else {
 		for i := range m.formFields {
@@ -138,20 +138,20 @@ func (m model) taskFormContent() (string, int) {
 	}
 	write(m.gap())
 
-	write(taskStepTitle("Command template", m.taskFocus == 2))
+	write(m.taskStepTitle("Command template", m.taskFocus == 2))
 	write("\n")
 	if m.taskFocus == 2 {
 		focusLine = line + m.taskCommandCursorLine()
 	}
 	write(m.taskCommandView())
 	write("\n")
-	write(mutedStyle.Render("Use {{field_key}} where a runtime value belongs."))
+	write(m.styles.muted.Render("Use {{field_key}} where a runtime value belongs."))
 	write(m.gap())
 
 	if m.taskFocus == 3 {
 		focusLine = line
 	}
-	write(taskStepTitle("Job policy", m.taskFocus == 3))
+	write(m.taskStepTitle("Job policy", m.taskFocus == 3))
 	write("\n")
 	write(m.pickerRow(jobPolicyLabels, jobPolicyIndex(m.formJobPolicy)))
 	return body.String(), focusLine
@@ -167,9 +167,9 @@ func (m model) taskCommandCursorLine() int {
 	return line + m.taskCommandInput.LineInfo().RowOffset
 }
 
-func taskStepTitle(title string, active bool) string {
+func (m model) taskStepTitle(title string, active bool) string {
 	if active {
-		return stepStyle.Render(title)
+		return m.styles.step.Render(title)
 	}
 	return title
 }
@@ -182,7 +182,7 @@ func (m model) pickerRow(options []string, selected int) string {
 	for i, option := range options {
 		token := "[ " + option + " ]"
 		if i == selected {
-			token = selectedStyle.Render("› " + option)
+			token = m.styles.selected.Render("› " + option)
 		}
 		tokenWidth := ansi.StringWidth(token)
 		separator := 0

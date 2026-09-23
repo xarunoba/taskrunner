@@ -6,6 +6,7 @@ import (
 
 	"github.com/charmbracelet/x/ansi"
 	"github.com/xarunoba/taskrunner/internal/task"
+	"github.com/xarunoba/taskrunner/internal/theme"
 )
 
 func TestTabClicksHitTabsNotContentOrPath(t *testing.T) {
@@ -16,7 +17,7 @@ func TestTabClicksHitTabsNotContentOrPath(t *testing.T) {
 		{Name: "Jobs pipeline", Command: "true"},
 		{Name: "Build", Command: "true"},
 	}
-	m := newModel(task.NewStore(workspace), tasks)
+	m := newModel(task.NewStore(workspace), tasks, theme.NewStore(t.TempDir()), theme.Default())
 	m.resize(80, 24)
 
 	// Header columns: "╭─ " then padded "Tasks" (cols 4-8), "Jobs" (cols 12-15).
@@ -91,7 +92,7 @@ func TestTaskClickSelectsThenRuns(t *testing.T) {
 			},
 		},
 	}
-	m := newModel(task.NewStore(t.TempDir()), tasks)
+	m := newModel(task.NewStore(t.TempDir()), tasks, theme.NewStore(t.TempDir()), theme.Default())
 	m.resize(80, 24)
 
 	view := strings.Split(ansi.Strip(m.View()), "\n")

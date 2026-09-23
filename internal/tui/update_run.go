@@ -75,8 +75,8 @@ func (m *model) prepareRunField() tea.Cmd {
 		m.filePicker.ShowHidden = true
 		m.filePicker.FileAllowed = true
 		m.filePicker.DirAllowed = false
-		m.filePicker.Styles.Cursor = cursorStyle
-		m.filePicker.Styles.Selected = selectedStyle
+		m.filePicker.Styles.Cursor = m.styles.cursor
+		m.filePicker.Styles.Selected = m.styles.selected
 		m.filePicker.SetHeight(m.filePickerHeight())
 		return m.filePicker.Init()
 	}
@@ -166,9 +166,21 @@ func (m model) updateRunChoice(msg tea.Msg, field task.Field) (tea.Model, tea.Cm
 }
 
 func (m model) updateRunFile(msg tea.Msg, field task.Field) (tea.Model, tea.Cmd) {
-	if key, ok := msg.(tea.KeyMsg); ok && key.String() == "s" && field.Optional {
-		m.runValues[field.Key] = ""
-		return m.advanceRun()
+	if field.Optional {
+		if key, ok := msg.(tea.KeyMsg); ok {
+			switch key.String() {
+			case "enter":
+				if m.choiceCursor < 0 {
+					m.runValues[field.Key] = ""
+					return m.advanceRun()
+				}
+			case "down", "j":
+				if m.choiceCursor < 0 {
+					m.choiceCursor = 0
+					return m, nil
+				}
+			}
+		}
 	}
 	var cmd tea.Cmd
 	m.filePicker, cmd = m.filePicker.Update(msg)

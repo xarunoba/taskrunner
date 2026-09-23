@@ -23,6 +23,7 @@ func (m model) helpGroups() []helpGroup {
 		title: "General",
 		bindings: []helpBinding{
 			{key: "tab / f6", description: "switch Tasks or Jobs"},
+			{key: "s", description: "settings"},
 			{key: "q / ctrl+c", description: "quit"},
 			{key: "? / f1 / esc", description: "close keybinds"},
 		},
@@ -124,7 +125,7 @@ func (m model) helpContent() string {
 			body.WriteString("\n\n")
 		}
 		if group.title != "" {
-			body.WriteString(accentStyle.Render(group.title))
+			body.WriteString(m.styles.accent.Render(group.title))
 			body.WriteByte('\n')
 		}
 		keyWidth := 0
@@ -136,7 +137,7 @@ func (m model) helpContent() string {
 				body.WriteByte('\n')
 			}
 			body.WriteString("  ")
-			body.WriteString(mutedStyle.Render(binding.key))
+			body.WriteString(m.styles.muted.Render(binding.key))
 			body.WriteString(strings.Repeat(" ", keyWidth-ansi.StringWidth(binding.key)+2))
 			body.WriteString(binding.description)
 		}
@@ -165,20 +166,20 @@ func (m model) helpTitle() string {
 	return "Keybinds - " + m.helpScreenName()
 }
 
-func (m model) compactHelp() bool {
+func (m model) compactModal() bool {
 	return m.width < 60 || m.height < 18
 }
 
 func (m *model) syncHelpViewport() {
 	content := m.helpContent()
 	lineCount := strings.Count(content, "\n") + 1
-	if m.compactHelp() {
+	if m.compactModal() {
 		m.helpViewport.Width = max(1, m.contentWidth()-1)
 		m.helpViewport.Height = m.contentHeight()
 	} else {
 		modalWidth := min(72, max(1, m.width-8))
-		m.helpViewport.Width = max(1, modalWidth-helpModalStyle.GetHorizontalFrameSize())
-		maxHeight := max(1, m.height-6-helpModalStyle.GetVerticalFrameSize())
+		m.helpViewport.Width = max(1, modalWidth-m.styles.helpModal.GetHorizontalFrameSize())
+		maxHeight := max(1, m.height-6-m.styles.helpModal.GetVerticalFrameSize())
 		m.helpViewport.Height = min(lineCount, maxHeight)
 	}
 	m.helpViewport.SetContent(content)

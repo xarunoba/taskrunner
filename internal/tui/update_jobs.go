@@ -86,7 +86,7 @@ func (m *model) setResultContent() {
 	var content strings.Builder
 	if m.result.Command != "" {
 		script := ansi.Hardwrap("$ "+m.result.Command, m.resultViewport.Width, true)
-		content.WriteString(mutedStyle.Render(script))
+		content.WriteString(m.styles.muted.Render(script))
 		content.WriteString("\n\n")
 	}
 	content.WriteString(output)

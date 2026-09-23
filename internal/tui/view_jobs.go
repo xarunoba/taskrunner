@@ -46,14 +46,14 @@ func (m model) taskActivity(taskID string) string {
 func (m model) jobsView() string {
 	var body strings.Builder
 	if len(m.jobs) == 0 {
-		body.WriteString(mutedStyle.Render("No jobs yet."))
+		body.WriteString(m.styles.muted.Render("No jobs yet."))
 	} else {
 		start, end := visibleRange(len(m.jobs), m.jobCursor, max(1, m.contentHeight()-4))
 		for i := start; i < end; i++ {
 			job := m.jobs[len(m.jobs)-1-i]
 			line := fmt.Sprintf("%-9s %s  %s", strings.ToUpper(string(job.Status)), job.Name, job.ShortID())
 			if i == m.jobCursor {
-				line = selectedStyle.Render("› " + line)
+				line = m.styles.selected.Render("› " + line)
 			} else {
 				line = "  " + line
 			}
@@ -61,7 +61,7 @@ func (m model) jobsView() string {
 			body.WriteByte('\n')
 			if i == m.jobCursor {
 				body.WriteString("  ")
-				body.WriteString(mutedStyle.Render(fmt.Sprintf(
+				body.WriteString(m.styles.muted.Render(fmt.Sprintf(
 					"%s • %d bytes output • %s",
 					job.CreatedAt.Local().Format("2006-01-02 15:04:05"),
 					job.OutputSize,
@@ -76,14 +76,14 @@ func (m model) jobsView() string {
 
 func (m model) resultHeader(now time.Time) string {
 	status := strings.ToUpper(string(m.result.Status))
-	style := jobQueuedStyle
+	style := m.styles.jobQueued
 	switch m.result.Status {
 	case daemon.StatusFailed:
-		style = jobFailedStyle
+		style = m.styles.jobFailed
 	case daemon.StatusSucceeded:
-		style = jobSucceededStyle
+		style = m.styles.jobSucceeded
 	case daemon.StatusCanceled:
-		style = jobCanceledStyle
+		style = m.styles.jobCanceled
 	}
 
 	left := style.Render(status) + "  " + m.result.Name
@@ -95,7 +95,7 @@ func (m model) resultHeader(now time.Time) string {
 	if elapsed == "" {
 		return left
 	}
-	elapsed = mutedStyle.Render(elapsed)
+	elapsed = m.styles.muted.Render(elapsed)
 
 	width := m.contentWidth()
 	left = ansi.Truncate(left, max(0, width-ansi.StringWidth(elapsed)-1), "…")
@@ -120,13 +120,13 @@ func (m model) resultView() string {
 	body.WriteString(m.resultHeader(time.Now()))
 	if m.result.StorageError != "" {
 		body.WriteByte('\n')
-		body.WriteString(errorStyle.Render("Log persistence: " + m.result.StorageError))
+		body.WriteString(m.styles.error.Render("Log persistence: " + m.result.StorageError))
 	}
 	body.WriteString(m.gap())
 	body.WriteString(lipgloss.JoinHorizontal(
 		lipgloss.Top,
 		m.resultViewport.View(),
-		scrollBar(
+		m.scrollBar(
 			m.resultViewport.Height,
 			!m.resultViewport.AtTop() || !m.resultViewport.AtBottom(),
 			m.resultViewport.ScrollPercent(),

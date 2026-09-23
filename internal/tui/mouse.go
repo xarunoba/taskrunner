@@ -14,6 +14,9 @@ import (
 func (m model) updateMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	event := tea.MouseEvent(msg)
 	if event.IsWheel() {
+		if m.settingsOpen {
+			return m, nil
+		}
 		if m.helpOpen {
 			return m.updateHelp(msg)
 		}
@@ -42,6 +45,18 @@ func (m model) updateMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	lines := strings.Split(ansi.Strip(m.View()), "\n")
+	if mouseLineIsLastMatch(lines, event.Y, settingsChipText) {
+		if start, end := m.settingsChipColumns(); event.X >= start && event.X < end {
+			if m.settingsOpen {
+				m.settingsOpen = false
+				return m, nil
+			}
+			return m.openSettings()
+		}
+	}
+	if m.settingsOpen {
+		return m.clickSettings(lines, event.Y, event.X)
+	}
 	if mouseLineIsLastMatch(lines, event.Y, helpChipText) {
 		if start, end := m.helpChipColumns(); event.X >= start && event.X < end {
 			if m.helpOpen {
@@ -103,6 +118,21 @@ func mouseLineIsLastMatch(lines []string, y int, text string) bool {
 		}
 	}
 	return false
+}
+
+func (m model) settingsChipColumns() (int, int) {
+	width := m.width
+	if width <= 0 {
+		width = 80
+	}
+	helpStart, _ := m.helpChipColumns()
+	end := helpStart - 1
+	if m.canGoBack() {
+		backStart, _, _ := m.backChipColumns()
+		end = backStart - 1
+	}
+	start := max(1, end-m.settingsChipWidth())
+	return start, end
 }
 
 func (m model) helpChipColumns() (int, int) {
@@ -298,6 +328,7 @@ func (m model) clickFieldForm(line string, x int) (tea.Model, tea.Cmd) {
 
 func (m model) clickRunForm(line string, x int) (tea.Model, tea.Cmd) {
 	field := m.runTask.Fields[m.runIndex]
+
 	switch field.Type {
 	case task.FieldText:
 		m.runInput.SetCursor(max(0, x-3))

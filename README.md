@@ -29,7 +29,21 @@ taskrunner
 
 ## TUI
 
-Run `taskrunner` without arguments to open the **Tasks** tab. Press `?` for keybinds on the current screen; while editing text, use `F1` for help and `Ctrl+C` to quit. The footer shows **Back** outside each tab's home screen. Click **Back** to return or **? keybinds** to toggle help.
+Run `taskrunner` without arguments to open the **Tasks** tab. Press `?` for keybinds on the current screen; while editing text, use `F1` for help and `Ctrl+C` to quit. The footer shows **s settings** everywhere, plus **Back** outside each tab's home screen. Click **Back** to return, **s settings** to change the theme, or **? keybinds** to toggle help.
+
+### Settings
+
+Press `s` or click the **s settings** footer chip to open the Settings modal on any screen (outside text entry). `Esc` or `s` closes it without changing anything.
+
+| Input | Action |
+| --- | --- |
+| `s` or footer chip | Open or close Settings |
+| `↑` / `↓` | Move between setting rows |
+| `←` / `→`, `h` / `l`, or `Enter` | Cycle the selected row to its previous or next value |
+| `Esc` | Close without changing |
+| Mouse | Click a row's label for the previous value or its value for the next |
+
+The **Theme** choice applies immediately and saves to the configuration file; see [Configuration](#configuration).
 
 ### Tasks
 
@@ -68,8 +82,8 @@ Fields run in their displayed order and can be required or optional. Field value
 | `Enter` | Accept the current value |
 | `↑` / `↓` | Browse previous values for the active text field |
 | `Shift+Tab` or `Ctrl+←` | Return to the previous field |
-| `s` | Skip an optional file field |
 | `Esc` | Cancel the run |
+| Mouse | Select a file or control; click **Skip** for an optional file field |
 
 Moving backward preserves values already entered. Recent values per field are remembered, so repeated runs pick up where you left off.
 
@@ -183,6 +197,38 @@ Tasks live in `.taskrunner/` inside the workspace, one JSON file per task. You n
 To share a task, copy its JSON file into `.taskrunner/tasks/` in another workspace. Every task is validated when loaded, and malformed files are reported by filename.
 
 Field values are shell-quoted before substitution, so task files cannot accidentally inject shell syntax. A field can deliberately opt out for trusted shell snippets; the TUI marks such fields and warns before execution.
+
+## Configuration
+
+Display preferences are per user, not per workspace. Taskrunner reads them from the XDG configuration directory: `$XDG_CONFIG_HOME/taskrunner/`, or `~/.config/taskrunner/` when `XDG_CONFIG_HOME` is unset. Without a configuration file, the TUI uses the built-in `default` theme (green accents).
+
+`config.json` selects the theme:
+
+```json
+{ "theme": "violet" }
+```
+
+Custom themes live in `themes/<name>.json`; the file name is the theme name. Names may contain only letters, digits, `_`, and `-`. A theme defines every color role the TUI renders; scalar roles take one color and pair roles take a `foreground` and `background` color. Colors are ANSI 256 numbers or hex values:
+
+```json
+{
+  "colors": {
+    "accent": "63",
+    "muted": "241",
+    "cursor": "212",
+    "error": "196",
+    "selection": { "foreground": "230", "background": "57" },
+    "inactive_tab": { "foreground": "250", "background": "236" },
+    "status": { "foreground": "250", "background": "236" },
+    "error_badge": { "foreground": "230", "background": "196" },
+    "queued": { "foreground": "230", "background": "63" },
+    "succeeded": { "foreground": "0", "background": "42" },
+    "canceled": { "foreground": "255", "background": "241" }
+  }
+}
+```
+
+Choosing a theme in Settings writes only the `theme` key and keeps every other top-level key in `config.json`. A malformed `config.json` is reported at startup instead of being overwritten. Settings enumerates themes from valid files in the `themes` directory in lexical order after `default`.
 
 ## Development
 

@@ -9,6 +9,7 @@ import (
 
 	"github.com/xarunoba/taskrunner/internal/daemon"
 	"github.com/xarunoba/taskrunner/internal/task"
+	"github.com/xarunoba/taskrunner/internal/theme"
 	"github.com/xarunoba/taskrunner/internal/tui"
 )
 
@@ -97,17 +98,25 @@ func (a *cliApp) runTUI(taskName string, create bool) error {
 	if err != nil {
 		return err
 	}
+	themes, err := theme.Open()
+	if err != nil {
+		return fmt.Errorf("open theme store: %w", err)
+	}
+	selected, err := themes.Load()
+	if err != nil {
+		return fmt.Errorf("load theme: %w", err)
+	}
 	if create {
-		return tui.Create(store, items, a.stdin, a.stdout)
+		return tui.Create(store, items, themes, selected, a.stdin, a.stdout)
 	}
 	if taskName == "" {
-		return tui.Run(store, items, a.stdin, a.stdout)
+		return tui.Run(store, items, themes, selected, a.stdin, a.stdout)
 	}
 	item, err := findTask(items, taskName)
 	if err != nil {
 		return err
 	}
-	return tui.Edit(store, items, item, a.stdin, a.stdout)
+	return tui.Edit(store, items, item, themes, selected, a.stdin, a.stdout)
 }
 
 func workspacePath() (string, error) {

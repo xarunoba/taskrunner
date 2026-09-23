@@ -7,45 +7,54 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
-func scrollBar(height int, scrollable bool, percent float64) string {
+func (m model) scrollBar(height int, scrollable bool, percent float64) string {
 	lines := make([]string, max(1, height))
 	if !scrollable {
 		return strings.Join(lines, "\n")
 	}
 	thumb := int(percent*float64(len(lines)-1) + 0.5)
 	for i := range lines {
-		lines[i] = mutedStyle.Render("│")
+		lines[i] = m.styles.muted.Render("│")
 	}
-	lines[thumb] = accentStyle.Render("█")
+	lines[thumb] = m.styles.accent.Render("█")
 	return strings.Join(lines, "\n")
 }
 
 const (
-	backChipText = "← back"
-	helpChipText = "? keybinds"
+	settingsChipText = "s settings"
+	backChipText     = "← back"
+	helpChipText     = "? keybinds"
 )
 
 func (m model) canGoBack() bool {
 	return m.screen != topLevelTab(m.screen)
 }
 
+func (m model) settingsChipWidth() int {
+	return ansi.StringWidth(m.styles.helpChip.Render(settingsChipText))
+}
+
 func (m model) backChipWidth() int {
-	return ansi.StringWidth(helpChipStyle.Render(backChipText))
+	return ansi.StringWidth(m.styles.helpChip.Render(backChipText))
 }
 
 func (m model) helpChipWidth() int {
-	return ansi.StringWidth(helpChipStyle.Render(helpChipText))
+	return ansi.StringWidth(m.styles.helpChip.Render(helpChipText))
 }
 
 func (m model) footerControls() string {
-	help := helpChipStyle.Render(helpChipText)
+	settings := m.styles.helpChip.Render(settingsChipText)
+	help := m.styles.helpChip.Render(helpChipText)
 	if !m.canGoBack() {
-		return help
+		return settings + " " + help
 	}
-	return helpChipStyle.Render(backChipText) + " " + help
+	return settings + " " + m.styles.helpChip.Render(backChipText) + " " + help
 }
 
 func (m model) View() string {
+	if m.settingsOpen {
+		return m.settingsView()
+	}
 	base := m.baseView()
 	if !m.helpOpen {
 		return base
@@ -54,27 +63,27 @@ func (m model) View() string {
 	help := lipgloss.JoinHorizontal(
 		lipgloss.Top,
 		m.helpViewport.View(),
-		scrollBar(
+		m.scrollBar(
 			m.helpViewport.Height,
 			!m.helpViewport.AtTop() || !m.helpViewport.AtBottom(),
 			m.helpViewport.ScrollPercent(),
 		),
 	)
-	if m.compactHelp() {
-		return titledPanel(m.renderPanelWithFooter(help), m.helpTitle())
+	if m.compactModal() {
+		return m.titledPanel(m.renderPanelWithFooter(help), m.helpTitle())
 	}
-	return overlay(base, titledPanel(helpModalStyle.Render(help), m.helpTitle()), m.width, m.height)
+	return overlay(base, m.titledPanel(m.styles.helpModal.Render(help), m.helpTitle()), m.width, m.height)
 }
 
-func titledPanel(panel, title string) string {
+func (m model) titledPanel(panel, title string) string {
 	lines := strings.Split(panel, "\n")
 	width := ansi.StringWidth(lines[0])
 	titleWidth := max(0, width-5)
-	title = ansi.Truncate(accentStyle.Render(title), titleWidth, "…")
+	title = ansi.Truncate(m.styles.accent.Render(title), titleWidth, "…")
 	fillWidth := max(0, width-ansi.StringWidth(title)-5)
-	lines[0] = borderStyle.Render("╭─ ") +
+	lines[0] = m.styles.border.Render("╭─ ") +
 		title +
-		borderStyle.Render(" "+strings.Repeat("─", fillWidth)+"╮")
+		m.styles.border.Render(" "+strings.Repeat("─", fillWidth)+"╮")
 	return strings.Join(lines, "\n")
 }
 
@@ -160,26 +169,26 @@ func (m *model) switchTab(target screen) {
 }
 
 func (m model) workspaceHeader(active screen) string {
-	tasksStyle := inactiveTabStyle
-	jobsStyle := inactiveTabStyle
+	tasksStyle := m.styles.inactiveTab
+	jobsStyle := m.styles.inactiveTab
 	if topLevelTab(active) == screenList {
-		tasksStyle = activeTabStyle
+		tasksStyle = m.styles.activeTab
 	} else {
-		jobsStyle = activeTabStyle
+		jobsStyle = m.styles.activeTab
 	}
 
 	tabs := tasksStyle.Render("Tasks") + " " + jobsStyle.Render("Jobs")
-	width := m.contentWidth() + panelStyle.GetHorizontalFrameSize()
+	width := m.contentWidth() + m.styles.panel.GetHorizontalFrameSize()
 	titleWidth := max(0, width-5)
 	title := ansi.Truncate(tabs, titleWidth, "")
 	if pathWidth := titleWidth - ansi.StringWidth(tabs) - 2; pathWidth > 0 {
 		path := ansi.Truncate(m.store.Workspace(), pathWidth, "…")
-		title += "  " + mutedStyle.Render(path)
+		title += "  " + m.styles.muted.Render(path)
 	}
 	fillWidth := max(0, width-ansi.StringWidth(title)-5)
-	return borderStyle.Render("╭─ ") +
+	return m.styles.border.Render("╭─ ") +
 		title +
-		borderStyle.Render(" "+strings.Repeat("─", fillWidth)+"╮")
+		m.styles.border.Render(" "+strings.Repeat("─", fillWidth)+"╮")
 }
 
 func (m model) renderWorkspacePanel(content string, active screen) string {
@@ -221,11 +230,11 @@ func (m model) statusBar() string {
 	line += controls
 	line = ansi.Truncate(line, inner, "")
 	line += strings.Repeat(" ", max(0, inner-ansi.StringWidth(line)))
-	style := statusBarStyle
+	style := m.styles.statusBar
 	if m.statusError {
-		style = statusBarErrorStyle
+		style = m.styles.statusBarError
 	}
-	return borderStyle.Render("╰") + style.Render(line) + borderStyle.Render("╯")
+	return m.styles.border.Render("╰") + style.Render(line) + m.styles.border.Render("╯")
 }
 
 func (m model) renderPanelWithFooter(content string) string {
@@ -249,11 +258,11 @@ func (m model) renderPanel(content string) string {
 		case 2:
 			lines = []string{lines[0], lines[len(lines)-1]}
 		default:
-			lines = append(lines[:height-2], mutedStyle.Render("…"), lines[len(lines)-1])
+			lines = append(lines[:height-2], m.styles.muted.Render("…"), lines[len(lines)-1])
 		}
 	}
-	return panelStyle.
-		Width(width + panelStyle.GetHorizontalPadding()).
-		Height(height + panelStyle.GetVerticalPadding()).
+	return m.styles.panel.
+		Width(width + m.styles.panel.GetHorizontalPadding()).
+		Height(height + m.styles.panel.GetVerticalPadding()).
 		Render(strings.Join(lines, "\n"))
 }

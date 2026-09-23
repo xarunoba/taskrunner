@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -9,10 +10,19 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/muesli/termenv"
 
 	"github.com/xarunoba/taskrunner/internal/daemon"
 	"github.com/xarunoba/taskrunner/internal/task"
+	"github.com/xarunoba/taskrunner/internal/theme"
 )
+
+func TestMain(m *testing.M) {
+	// Render styles with a real color profile so palette assertions compare
+	// colored output instead of the plain-text fallback used without a TTY.
+	lipgloss.SetColorProfile(termenv.ANSI256)
+	os.Exit(m.Run())
+}
 
 func TestViewsFitTerminal(t *testing.T) {
 	t.Parallel()
@@ -39,7 +49,7 @@ func TestViewsFitTerminal(t *testing.T) {
 		t.Run(fmt.Sprintf("%dx%d", size.width, size.height), func(t *testing.T) {
 			t.Parallel()
 
-			m := newModel(task.NewStore(t.TempDir()), tasks)
+			m := newModel(task.NewStore(t.TempDir()), tasks, theme.NewStore(t.TempDir()), theme.Default())
 			m.cursor = 10
 			m.resize(size.width, size.height)
 			assertFillsTerminal(t, m.View(), size.width, size.height)
@@ -71,7 +81,7 @@ func TestTaskFormViewportFollowsFocusedControls(t *testing.T) {
 		{Key: "three", Label: "Three", Type: task.FieldText},
 		{Key: "four", Label: "Four", Type: task.FieldText},
 	}
-	m := newModel(task.NewStore(t.TempDir()), nil)
+	m := newModel(task.NewStore(t.TempDir()), nil, theme.NewStore(t.TempDir()), theme.Default())
 	m.resize(24, 10)
 	m.openTaskForm(task.Task{Name: "Compact", Command: command, Fields: fields})
 
@@ -116,10 +126,11 @@ func TestTaskFormViewportFollowsFocusedControls(t *testing.T) {
 func TestScrollBarShowsViewportPosition(t *testing.T) {
 	t.Parallel()
 
-	if got, want := ansi.Strip(scrollBar(3, true, 0)), "█\n│\n│"; got != want {
+	m := newModel(task.NewStore(t.TempDir()), nil, theme.NewStore(t.TempDir()), theme.Default())
+	if got, want := ansi.Strip(m.scrollBar(3, true, 0)), "█\n│\n│"; got != want {
 		t.Fatalf("top scroll bar = %q, want %q", got, want)
 	}
-	if got, want := ansi.Strip(scrollBar(3, true, 1)), "│\n│\n█"; got != want {
+	if got, want := ansi.Strip(m.scrollBar(3, true, 1)), "│\n│\n█"; got != want {
 		t.Fatalf("bottom scroll bar = %q, want %q", got, want)
 	}
 }
@@ -141,7 +152,7 @@ func TestTaskLogOpensAtBottomAndOutputClickDoesNotClose(t *testing.T) {
 		OutputSize: len(strings.Join(lines, "\n")),
 	}
 
-	m := newModel(task.NewStore(t.TempDir()), nil)
+	m := newModel(task.NewStore(t.TempDir()), nil, theme.NewStore(t.TempDir()), theme.Default())
 	m.resize(40, 10)
 	updated, _ := m.Update(jobOpenedMsg{job: job})
 	m = updated.(model)
@@ -182,7 +193,7 @@ func TestTaskLogOpensAtBottomAndOutputClickDoesNotClose(t *testing.T) {
 func TestFailedTaskLogShowsFailureSummary(t *testing.T) {
 	t.Parallel()
 
-	m := newModel(task.NewStore(t.TempDir()), nil)
+	m := newModel(task.NewStore(t.TempDir()), nil, theme.NewStore(t.TempDir()), theme.Default())
 	m.resize(80, 24)
 	updated, _ := m.Update(jobOpenedMsg{job: daemon.Job{
 		ID:      "run-failed",
@@ -198,7 +209,7 @@ func TestFailedTaskLogShowsFailureSummary(t *testing.T) {
 	if !strings.Contains(view, "FAILED") || !strings.Contains(view, "Failing task: exit status 7") {
 		t.Fatalf("result view does not contain failure summary:\n%s", view)
 	}
-	if !strings.Contains(styledView, jobFailedStyle.Render("FAILED")) {
+	if !strings.Contains(styledView, m.styles.jobFailed.Render("FAILED")) {
 		t.Fatalf("failed status does not use its background badge:\n%s", styledView)
 	}
 	if strings.Contains(view, "JOB LOG") {
@@ -213,7 +224,7 @@ func TestTaskLogRightAlignsElapsedTime(t *testing.T) {
 	t.Parallel()
 
 	started := time.Date(2026, time.September, 23, 12, 0, 0, 0, time.UTC)
-	m := newModel(task.NewStore(t.TempDir()), nil)
+	m := newModel(task.NewStore(t.TempDir()), nil, theme.NewStore(t.TempDir()), theme.Default())
 	m.resize(60, 16)
 	m.openResult(daemon.Job{
 		ID:        "run-timed",
@@ -245,7 +256,7 @@ func TestTaskLogWrapsTheCompleteCommand(t *testing.T) {
 	t.Parallel()
 
 	command := "printf '%s' alpha-bravo-charlie-delta-echo\nprintf finished"
-	m := newModel(task.NewStore(t.TempDir()), nil)
+	m := newModel(task.NewStore(t.TempDir()), nil, theme.NewStore(t.TempDir()), theme.Default())
 	m.resize(32, 16)
 	m.openResult(daemon.Job{
 		ID:      "run-wrapped",
@@ -264,7 +275,7 @@ func TestTaskLogWrapsTheCompleteCommand(t *testing.T) {
 	}
 
 	longName := "task-name-that-is-too-long-for-the-list-panel"
-	list := newModel(task.NewStore(t.TempDir()), []task.Task{{Name: longName, Command: command}})
+	list := newModel(task.NewStore(t.TempDir()), []task.Task{{Name: longName, Command: command}}, theme.NewStore(t.TempDir()), theme.Default())
 	list.resize(32, 16)
 	listView := ansi.Strip(list.View())
 	if strings.Contains(listView, longName) || !strings.Contains(listView, "…") {
@@ -276,14 +287,14 @@ func TestWorkspaceHeaderUsesTopBorder(t *testing.T) {
 	t.Parallel()
 
 	workspace := t.TempDir()
-	m := newModel(task.NewStore(workspace), nil)
+	m := newModel(task.NewStore(workspace), nil, theme.NewStore(t.TempDir()), theme.Default())
 	m.resize(80, 24)
 
 	m.setStatus("Saved")
 	styledView := m.View()
 	styledHeader, _, _ := strings.Cut(styledView, "\n")
-	if !strings.Contains(styledHeader, activeTabStyle.Render("Tasks")) ||
-		!strings.Contains(styledHeader, inactiveTabStyle.Render("Jobs")) {
+	if !strings.Contains(styledHeader, m.styles.activeTab.Render("Tasks")) ||
+		!strings.Contains(styledHeader, m.styles.inactiveTab.Render("Jobs")) {
 		t.Fatalf("top border does not render active and inactive tab backgrounds:\n%s", styledHeader)
 	}
 
@@ -305,10 +316,13 @@ func TestWorkspaceHeaderUsesTopBorder(t *testing.T) {
 		t.Fatalf("footer does not contain the status message and keybinds chip:\n%s", view)
 	}
 	styledFooter := strings.Split(styledView, "\n")[len(lines)-1]
-	if !strings.Contains(styledFooter, statusBarStyle.Render(" Saved")) {
+	// The status bar styles the whole footer line, so the message keeps the
+	// style opening sequence but has no reset sequence of its own.
+	styledMessage, _, _ := strings.Cut(m.styles.statusBar.Render(" Saved"), "\x1b[0m")
+	if !strings.Contains(styledFooter, styledMessage) {
 		t.Fatalf("status message does not use the status bar background:\n%s", styledFooter)
 	}
-	if !strings.Contains(styledFooter, helpChipStyle.Render("? keybinds")) {
+	if !strings.Contains(styledFooter, m.styles.helpChip.Render("? keybinds")) {
 		t.Fatalf("keybinds chip does not use its own background:\n%s", styledFooter)
 	}
 	if strings.Contains(view, "tab switch") || strings.Contains(view, "q quit") {
@@ -321,14 +335,19 @@ func TestWorkspaceHeaderUsesTopBorder(t *testing.T) {
 func TestFooterShowsContextualControls(t *testing.T) {
 	t.Parallel()
 
-	m := newModel(task.NewStore(t.TempDir()), nil)
+	m := newModel(task.NewStore(t.TempDir()), nil, theme.NewStore(t.TempDir()), theme.Default())
 	m.resize(80, 24)
 	footer := ansi.Strip(strings.Split(m.View(), "\n")[m.height-1])
-	if !strings.Contains(footer, helpChipText) {
-		t.Fatalf("Tasks footer does not contain %q:\n%s", helpChipText, footer)
+	for _, text := range []string{settingsChipText, helpChipText} {
+		if !strings.Contains(footer, text) {
+			t.Fatalf("Tasks footer does not contain %q:\n%s", text, footer)
+		}
 	}
 	if strings.Contains(footer, backChipText) {
 		t.Fatalf("Tasks home footer contains %q:\n%s", backChipText, footer)
+	}
+	if strings.Contains(footer, settingsChipText+" "+backChipText) && strings.Index(footer, settingsChipText) > strings.Index(footer, helpChipText) {
+		t.Fatalf("settings chip is not the first footer control:\n%s", footer)
 	}
 	for _, text := range []string{"enter run", "n new", "e edit", "d delete", "tab switch", "q quit"} {
 		if strings.Contains(footer, text) {
@@ -344,7 +363,7 @@ func TestFooterShowsContextualControls(t *testing.T) {
 		}
 	}
 	styledFooter := strings.Split(m.View(), "\n")[m.height-1]
-	if !strings.Contains(styledFooter, helpChipStyle.Render(backChipText)) {
+	if !strings.Contains(styledFooter, m.styles.helpChip.Render(backChipText)) {
 		t.Fatalf("back chip does not use the footer control style:\n%s", styledFooter)
 	}
 
@@ -370,7 +389,7 @@ func TestFooterControlsSupportMouseInput(t *testing.T) {
 		{width: 40, height: 10},
 		{width: 80, height: 24},
 	} {
-		m := newModel(task.NewStore(t.TempDir()), nil)
+		m := newModel(task.NewStore(t.TempDir()), nil, theme.NewStore(t.TempDir()), theme.Default())
 		m.resize(size.width, size.height)
 
 		updated, _ := m.Update(mouseClickOn(t, m.View(), helpChipText))
@@ -403,7 +422,7 @@ func TestFooterControlsSupportMouseInput(t *testing.T) {
 func TestAdaptiveKeybindHelpPreservesContextAndCloses(t *testing.T) {
 	t.Parallel()
 
-	m := newModel(task.NewStore(t.TempDir()), []task.Task{{Name: "Visible task", Command: "true"}})
+	m := newModel(task.NewStore(t.TempDir()), []task.Task{{Name: "Visible task", Command: "true"}}, theme.NewStore(t.TempDir()), theme.Default())
 	m.resize(80, 24)
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'?'}})
 	m = updated.(model)
@@ -440,7 +459,7 @@ func TestAdaptiveKeybindHelpPreservesContextAndCloses(t *testing.T) {
 func TestKeybindHelpReopensAtTop(t *testing.T) {
 	t.Parallel()
 
-	m := newModel(task.NewStore(t.TempDir()), nil)
+	m := newModel(task.NewStore(t.TempDir()), nil, theme.NewStore(t.TempDir()), theme.Default())
 	m.resize(40, 10)
 	m.openTaskForm(task.Task{})
 	m.openHelp()
@@ -459,7 +478,7 @@ func TestKeybindHelpReopensAtTop(t *testing.T) {
 func TestQuestionMarkRemainsEditableAndF1OpensHelp(t *testing.T) {
 	t.Parallel()
 
-	m := newModel(task.NewStore(t.TempDir()), nil)
+	m := newModel(task.NewStore(t.TempDir()), nil, theme.NewStore(t.TempDir()), theme.Default())
 	m.resize(80, 24)
 	m.openTaskForm(task.Task{})
 	m.taskFocus = 2
@@ -481,7 +500,7 @@ func TestQuestionMarkRemainsEditableAndF1OpensHelp(t *testing.T) {
 func TestTabsRestoreScreenAndValues(t *testing.T) {
 	t.Parallel()
 
-	m := newModel(task.NewStore(t.TempDir()), nil)
+	m := newModel(task.NewStore(t.TempDir()), nil, theme.NewStore(t.TempDir()), theme.Default())
 	m.resize(80, 24)
 	m.openTaskForm(task.Task{})
 	m.taskNameInput.SetValue("draft task")
@@ -520,7 +539,7 @@ func TestJobsTabListsEveryJobNewestFirst(t *testing.T) {
 	}
 	m := newModel(task.NewStore(t.TempDir()), []task.Task{{
 		Name: "Build", Command: "true", File: "build.json",
-	}})
+	}}, theme.NewStore(t.TempDir()), theme.Default())
 	m.resize(80, 24)
 	m.applyDaemonPoll(daemonPollMsg{jobs: jobs, details: make(map[string]daemon.Job)})
 
@@ -561,7 +580,7 @@ func TestDeleteJobActionRemovesJobAndClosesOpenLog(t *testing.T) {
 	deleted := daemon.Job{
 		ID: "job-newer-87654321", TaskID: "build.json", Name: "Build", Status: daemon.StatusFailed,
 	}
-	m := newModel(task.NewStore(t.TempDir()), nil)
+	m := newModel(task.NewStore(t.TempDir()), nil, theme.NewStore(t.TempDir()), theme.Default())
 	m.applyDaemonPoll(daemonPollMsg{
 		jobs:    []daemon.Job{remaining, deleted},
 		details: make(map[string]daemon.Job),
@@ -596,7 +615,7 @@ func TestTaskListShowsPerTaskStatusWithoutTransientRunMessage(t *testing.T) {
 		{Name: "Build", Command: "true", File: "build.json"},
 		{Name: "Deploy", Command: "false", File: "deploy.json"},
 		{Name: "Cleanup", Command: "false", File: "cleanup.json"},
-	})
+	}, theme.NewStore(t.TempDir()), theme.Default())
 	m.resize(80, 24)
 	updated, _ := m.Update(taskStartedMsg{job: daemon.Job{
 		ID: "build-running", TaskID: "build.json", Name: "Build", Status: daemon.StatusRunning,
@@ -629,7 +648,7 @@ func TestOpenTaskLogAppendsLiveOutput(t *testing.T) {
 		ID: "run-live", TaskID: "build.json", Name: "Build",
 		Status: daemon.StatusRunning, Output: "first\n", OutputSize: 6,
 	}
-	m := newModel(task.NewStore(t.TempDir()), nil)
+	m := newModel(task.NewStore(t.TempDir()), nil, theme.NewStore(t.TempDir()), theme.Default())
 	m.resize(80, 24)
 	m.openResult(job)
 	m.applyDaemonPoll(daemonPollMsg{
@@ -655,7 +674,7 @@ func TestOpenTaskLogAppendsLiveOutput(t *testing.T) {
 func TestTaskFormHighlightsSelectedField(t *testing.T) {
 	t.Parallel()
 
-	m := newModel(task.NewStore(t.TempDir()), nil)
+	m := newModel(task.NewStore(t.TempDir()), nil, theme.NewStore(t.TempDir()), theme.Default())
 	m.resize(80, 24)
 	m.openTaskForm(task.Task{
 		Name: "Demo",
@@ -691,7 +710,7 @@ func TestTaskFormHighlightsSelectedField(t *testing.T) {
 func TestTaskFormArrowAndMouseNavigation(t *testing.T) {
 	t.Parallel()
 
-	m := newModel(task.NewStore(t.TempDir()), nil)
+	m := newModel(task.NewStore(t.TempDir()), nil, theme.NewStore(t.TempDir()), theme.Default())
 	m.resize(80, 24)
 	m.openTaskForm(task.Task{})
 
@@ -741,7 +760,7 @@ func TestTaskFormArrowAndMouseNavigation(t *testing.T) {
 func TestTaskCommandEditorStartsMultiline(t *testing.T) {
 	t.Parallel()
 
-	m := newModel(task.NewStore(t.TempDir()), nil)
+	m := newModel(task.NewStore(t.TempDir()), nil, theme.NewStore(t.TempDir()), theme.Default())
 	m.resize(80, 24)
 	m.openTaskForm(task.Task{})
 
@@ -764,7 +783,7 @@ func TestTaskCommandEditorAcceptsAndSavesMultipleLines(t *testing.T) {
 	t.Parallel()
 
 	store := task.NewStore(t.TempDir())
-	m := newModel(store, nil)
+	m := newModel(store, nil, theme.NewStore(t.TempDir()), theme.Default())
 	m.resize(80, 24)
 	m.openTaskForm(task.Task{})
 	m.taskNameInput.SetValue("Multiline")
@@ -803,7 +822,7 @@ func TestTaskFormF2SavesAndReordersFields(t *testing.T) {
 	t.Parallel()
 
 	store := task.NewStore(t.TempDir())
-	m := newModel(store, nil)
+	m := newModel(store, nil, theme.NewStore(t.TempDir()), theme.Default())
 	m.resize(80, 24)
 	m.openTaskForm(task.Task{})
 	m.taskNameInput.SetValue("Ordered task")
@@ -847,7 +866,7 @@ func TestRuntimeResolvesEarlierValuesInConfirmationLabel(t *testing.T) {
 			{Key: "confirmed", Label: "Deploy {{version}} to {{environment}}?", Type: task.FieldConfirm},
 		},
 	}
-	m := newModel(task.NewStore(t.TempDir()), []task.Task{item})
+	m := newModel(task.NewStore(t.TempDir()), []task.Task{item}, theme.NewStore(t.TempDir()), theme.Default())
 	m.resize(80, 24)
 	started, _ := m.startRun(item)
 	m = started.(model)
@@ -872,7 +891,7 @@ func TestRuntimeCanReturnToEarlierInput(t *testing.T) {
 			{Key: "second", Label: "Second", Type: task.FieldText},
 		},
 	}
-	m := newModel(task.NewStore(t.TempDir()), []task.Task{item})
+	m := newModel(task.NewStore(t.TempDir()), []task.Task{item}, theme.NewStore(t.TempDir()), theme.Default())
 	m.resize(80, 24)
 	started, _ := m.startRun(item)
 	m = started.(model)
@@ -901,7 +920,7 @@ func TestRuntimeCanReturnToEarlierInput(t *testing.T) {
 func TestFieldFormSavesReferField(t *testing.T) {
 	t.Parallel()
 
-	m := newModel(task.NewStore(t.TempDir()), nil)
+	m := newModel(task.NewStore(t.TempDir()), nil, theme.NewStore(t.TempDir()), theme.Default())
 	m.resize(80, 24)
 	m.formFields = []task.Field{
 		{Key: "db", Label: "Database", Type: task.FieldText, Optional: true},
@@ -955,7 +974,7 @@ func TestRunSkipsReferFields(t *testing.T) {
 			{Key: "r", Label: "Confirm DB", Type: task.FieldRefer, From: "db", Prefix: "--confirm "},
 		},
 	}
-	m := newModel(task.NewStore(t.TempDir()), []task.Task{item})
+	m := newModel(task.NewStore(t.TempDir()), []task.Task{item}, theme.NewStore(t.TempDir()), theme.Default())
 	m.resize(80, 24)
 	started, _ := m.startRun(item)
 	m = started.(model)
@@ -977,7 +996,7 @@ func TestRunSkipsReferFields(t *testing.T) {
 func TestFieldFormRoundTripsPrefixAndSuffix(t *testing.T) {
 	t.Parallel()
 
-	m := newModel(task.NewStore(t.TempDir()), nil)
+	m := newModel(task.NewStore(t.TempDir()), nil, theme.NewStore(t.TempDir()), theme.Default())
 	m.resize(80, 24)
 	m.formFields = []task.Field{
 		{Key: "tag", Label: "Tag", Type: task.FieldText, Prefix: "--tag ", Suffix: "!"},
@@ -1028,7 +1047,7 @@ func TestRuntimeTextHistoryUsesArrowKeys(t *testing.T) {
 		}
 	}
 
-	m := newModel(store, []task.Task{item})
+	m := newModel(store, []task.Task{item}, theme.NewStore(t.TempDir()), theme.Default())
 	m.resize(80, 24)
 	started, _ := m.startRun(item)
 	m = started.(model)
@@ -1063,7 +1082,7 @@ func TestRuntimeTextHistoryUsesArrowKeys(t *testing.T) {
 func TestMouseSelectsFieldControlsAndRuntimeChoices(t *testing.T) {
 	t.Parallel()
 
-	m := newModel(task.NewStore(t.TempDir()), nil)
+	m := newModel(task.NewStore(t.TempDir()), nil, theme.NewStore(t.TempDir()), theme.Default())
 	m.resize(80, 24)
 	m.formFields = []task.Field{
 		{Key: "value", Label: "Value", Type: task.FieldText},
@@ -1116,7 +1135,7 @@ func TestOptionalRuntimeFieldsCanBeSkipped(t *testing.T) {
 			{Key: "confirm", Label: "Confirm", Type: task.FieldConfirm, Optional: true},
 		},
 	}
-	m := newModel(task.NewStore(t.TempDir()), []task.Task{item})
+	m := newModel(task.NewStore(t.TempDir()), []task.Task{item}, theme.NewStore(t.TempDir()), theme.Default())
 	m.resize(80, 24)
 	started, _ := m.startRun(item)
 	m = started.(model)
@@ -1136,7 +1155,18 @@ func TestOptionalRuntimeFieldsCanBeSkipped(t *testing.T) {
 		t.Fatalf("optional choice skip produced index=%d value=%q", m.runIndex, m.runValues["choice"])
 	}
 
-	updated, _ = m.updateRunForm(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}})
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}})
+	m = updated.(model)
+	if !m.settingsOpen {
+		t.Fatal("s on the file picker did not open settings")
+	}
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m = updated.(model)
+	if m.settingsOpen {
+		t.Fatal("esc did not close settings over the file picker")
+	}
+
+	updated, _ = m.updateRunForm(tea.KeyMsg{Type: tea.KeyEnter})
 	m = updated.(model)
 	if m.runIndex != 3 || m.runValues["file"] != "" {
 		t.Fatalf("optional file skip produced index=%d value=%q", m.runIndex, m.runValues["file"])
@@ -1159,7 +1189,7 @@ func TestRequiredTextFieldStillRejectsEmptyValue(t *testing.T) {
 			{Key: "value", Label: "Value", Type: task.FieldText},
 		},
 	}
-	m := newModel(task.NewStore(t.TempDir()), []task.Task{item})
+	m := newModel(task.NewStore(t.TempDir()), []task.Task{item}, theme.NewStore(t.TempDir()), theme.Default())
 	started, _ := m.startRun(item)
 	m = started.(model)
 
@@ -1174,7 +1204,7 @@ func TestStandaloneTaskFormQuitsAfterCancelAndSave(t *testing.T) {
 	t.Parallel()
 
 	store := task.NewStore(t.TempDir())
-	m := newModel(store, nil)
+	m := newModel(store, nil, theme.NewStore(t.TempDir()), theme.Default())
 	m.standaloneForm = true
 	m.openTaskForm(task.Task{})
 

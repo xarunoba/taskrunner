@@ -10,6 +10,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.syncHelpViewport()
 		}
 		return m, nil
+	case settingsLoadedMsg:
+		m.applySettingsLoaded(msg)
+		return m, nil
+	case settingSelectedMsg:
+		m.applySettingSelected(msg)
+		return m, nil
 	case daemonPollMsg:
 		m.applyDaemonPoll(msg)
 		return m, m.pollDaemon()
@@ -41,6 +47,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "ctrl+c":
 			return m, tea.Quit
 		}
+		if m.settingsOpen {
+			return m.updateSettings(msg)
+		}
 		if m.helpOpen {
 			return m.updateHelp(msg)
 		}
@@ -52,6 +61,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if !m.acceptsTextInput() {
 				m.openHelp()
 				return m, nil
+			}
+		case "s":
+			if !m.acceptsTextInput() {
+				return m.openSettings()
 			}
 		case "q":
 			if !m.acceptsTextInput() {

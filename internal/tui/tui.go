@@ -13,6 +13,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/xarunoba/taskrunner/internal/daemon"
 	"github.com/xarunoba/taskrunner/internal/task"
+	"github.com/xarunoba/taskrunner/internal/theme"
 )
 
 type screen uint8
@@ -28,27 +29,67 @@ const (
 	screenResult
 )
 
-var (
-	accentColor         = lipgloss.Color("63")
-	accentStyle         = lipgloss.NewStyle().Foreground(accentColor).Bold(true)
-	borderStyle         = lipgloss.NewStyle().Foreground(accentColor)
-	mutedStyle          = lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
-	cursorStyle         = lipgloss.NewStyle().Foreground(lipgloss.Color("212")).Bold(true)
-	selectedStyle       = lipgloss.NewStyle().Foreground(lipgloss.Color("230")).Background(lipgloss.Color("57")).Bold(true).Padding(0, 1)
-	activeTabStyle      = selectedStyle
-	inactiveTabStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("250")).Background(lipgloss.Color("236")).Padding(0, 1)
-	stepStyle           = selectedStyle
-	errorStyle          = lipgloss.NewStyle().Foreground(lipgloss.Color("196"))
-	panelStyle          = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(accentColor).Padding(1, 2)
-	statusBarStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("250")).Background(lipgloss.Color("236"))
-	statusBarErrorStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("230")).Background(lipgloss.Color("196")).Bold(true)
-	helpChipStyle       = lipgloss.NewStyle().Foreground(lipgloss.Color("230")).Background(lipgloss.Color("57")).Bold(true).Padding(0, 1)
-	jobQueuedStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("230")).Background(accentColor).Bold(true).Padding(0, 1)
-	jobSucceededStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("0")).Background(lipgloss.Color("42")).Bold(true).Padding(0, 1)
-	jobFailedStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("230")).Background(lipgloss.Color("196")).Bold(true).Padding(0, 1)
-	jobCanceledStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("255")).Background(lipgloss.Color("241")).Bold(true).Padding(0, 1)
-	helpModalStyle      = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(accentColor).Padding(1, 2)
-)
+// styles owns every Lip Gloss style the TUI renders, derived from the
+// selected theme palette. Styles live on the model so a theme switch
+// rebuilds them without touching package state.
+type styles struct {
+	accent         lipgloss.Style
+	border         lipgloss.Style
+	muted          lipgloss.Style
+	cursor         lipgloss.Style
+	selected       lipgloss.Style
+	activeTab      lipgloss.Style
+	inactiveTab    lipgloss.Style
+	step           lipgloss.Style
+	error          lipgloss.Style
+	panel          lipgloss.Style
+	statusBar      lipgloss.Style
+	statusBarError lipgloss.Style
+	helpChip       lipgloss.Style
+	jobQueued      lipgloss.Style
+	jobSucceeded   lipgloss.Style
+	jobFailed      lipgloss.Style
+	jobCanceled    lipgloss.Style
+	helpModal      lipgloss.Style
+}
+
+func newStyles(p theme.Palette) styles {
+	selection := lipgloss.NewStyle().
+		Foreground(lipgloss.Color(p.Selection.Foreground)).
+		Background(lipgloss.Color(p.Selection.Background)).
+		Bold(true).
+		Padding(0, 1)
+	pair := func(pair theme.ColorPair) (lipgloss.Color, lipgloss.Color) {
+		return lipgloss.Color(pair.Foreground), lipgloss.Color(pair.Background)
+	}
+	inactiveForeground, inactiveBackground := pair(p.InactiveTab)
+	statusForeground, statusBackground := pair(p.Status)
+	badgeForeground, badgeBackground := pair(p.ErrorBadge)
+	queuedForeground, queuedBackground := pair(p.Queued)
+	succeededForeground, succeededBackground := pair(p.Succeeded)
+	canceledForeground, canceledBackground := pair(p.Canceled)
+
+	return styles{
+		accent:         lipgloss.NewStyle().Foreground(lipgloss.Color(p.Accent)).Bold(true),
+		border:         lipgloss.NewStyle().Foreground(lipgloss.Color(p.Accent)),
+		muted:          lipgloss.NewStyle().Foreground(lipgloss.Color(p.Muted)),
+		cursor:         lipgloss.NewStyle().Foreground(lipgloss.Color(p.Cursor)).Bold(true),
+		selected:       selection,
+		activeTab:      selection,
+		inactiveTab:    lipgloss.NewStyle().Foreground(inactiveForeground).Background(inactiveBackground).Padding(0, 1),
+		step:           selection,
+		error:          lipgloss.NewStyle().Foreground(lipgloss.Color(p.Error)),
+		panel:          lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color(p.Accent)).Padding(1, 2),
+		statusBar:      lipgloss.NewStyle().Foreground(statusForeground).Background(statusBackground),
+		statusBarError: lipgloss.NewStyle().Foreground(badgeForeground).Background(badgeBackground).Bold(true),
+		helpChip:       selection,
+		jobQueued:      lipgloss.NewStyle().Foreground(queuedForeground).Background(queuedBackground).Bold(true).Padding(0, 1),
+		jobSucceeded:   lipgloss.NewStyle().Foreground(succeededForeground).Background(succeededBackground).Bold(true).Padding(0, 1),
+		jobFailed:      lipgloss.NewStyle().Foreground(badgeForeground).Background(badgeBackground).Bold(true).Padding(0, 1),
+		jobCanceled:    lipgloss.NewStyle().Foreground(canceledForeground).Background(canceledBackground).Bold(true).Padding(0, 1),
+		helpModal:      lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color(p.Accent)).Padding(1, 2),
+	}
+}
 
 var fieldTypes = []task.FieldType{
 	task.FieldText,
@@ -111,6 +152,9 @@ type jobActionMsg struct {
 type model struct {
 	store        *task.Store
 	daemon       *daemon.Client
+	themes       *theme.Store
+	theme        theme.Theme
+	styles       styles
 	tasks        []task.Task
 	jobs         []daemon.Job
 	running      map[string]int
@@ -128,6 +172,12 @@ type model struct {
 	height       int
 	helpOpen     bool
 	helpViewport viewport.Model
+
+	settingsOpen    bool
+	settingsLoading bool
+	settingsSaving  bool
+	settingsCursor  int
+	settings        []settingChoice
 
 	taskNameInput    textinput.Model
 	taskCommandInput textarea.Model
@@ -162,7 +212,7 @@ type model struct {
 	resultViewport viewport.Model
 }
 
-func newModel(store *task.Store, tasks []task.Task) model {
+func newModel(store *task.Store, tasks []task.Task, themes *theme.Store, selected theme.Theme) model {
 	name := newInput("Build project", 100)
 	command := textarea.New()
 	command.Placeholder = "go build ./..."
@@ -182,6 +232,9 @@ func newModel(store *task.Store, tasks []task.Task) model {
 	return model{
 		store:            store,
 		daemon:           daemon.NewClient(store.Workspace()),
+		themes:           themes,
+		theme:            selected,
+		styles:           newStyles(selected.Palette),
 		tasks:            tasks,
 		running:          make(map[string]int),
 		queued:           make(map[string]int),
@@ -226,7 +279,7 @@ func (m model) contentWidth() int {
 	if width <= 0 {
 		width = 80
 	}
-	return max(1, width-panelStyle.GetHorizontalFrameSize())
+	return max(1, width-m.styles.panel.GetHorizontalFrameSize())
 }
 
 func (m model) contentHeight() int {
@@ -234,7 +287,7 @@ func (m model) contentHeight() int {
 	if height <= 0 {
 		height = 40
 	}
-	return max(1, height-panelStyle.GetVerticalFrameSize())
+	return max(1, height-m.styles.panel.GetVerticalFrameSize())
 }
 
 func (m *model) resizeTaskForm() {
