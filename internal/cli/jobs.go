@@ -15,7 +15,7 @@ import (
 	"github.com/xarunoba/taskrunner/internal/daemon"
 )
 
-func executeJobsCLI(workspace string, options jobListOptions, stdout io.Writer) error {
+func executeJobs(workspace string, options jobListOptions, stdout io.Writer) error {
 	jobs, err := daemon.NewClient(workspace).Jobs()
 	if err != nil {
 		return fmt.Errorf("list jobs: %w", err)
@@ -88,7 +88,7 @@ func executeJobLogsByReference(workspace, reference string, options jobLogsOptio
 	if err != nil {
 		return err
 	}
-	return executeJobLogsCLI(client, job, options, stdout)
+	return executeJobLogs(client, job, options, stdout)
 }
 
 func executeJobByReference(workspace, reference string, action jobAction, jsonOutput bool, stdout io.Writer) error {
@@ -99,9 +99,9 @@ func executeJobByReference(workspace, reference string, action jobAction, jsonOu
 
 	switch action {
 	case jobWait:
-		return executeJobWaitCLI(client, job, stdout)
+		return executeJobWait(client, job, stdout)
 	case jobInspect:
-		return executeJobInspectCLI(job, jsonOutput, stdout)
+		return executeJobInspect(job, jsonOutput, stdout)
 	case jobCancel:
 		job, err = client.Cancel(job.ID)
 		if err == nil {
@@ -139,7 +139,7 @@ func loadJobByReference(workspace, reference string) (*daemon.Client, daemon.Job
 	return client, job, nil
 }
 
-func executeJobLogsCLI(client *daemon.Client, job daemon.Job, options jobLogsOptions, stdout io.Writer) error {
+func executeJobLogs(client *daemon.Client, job daemon.Job, options jobLogsOptions, stdout io.Writer) error {
 	current, err := client.Job(job.ID, 0)
 	if err != nil {
 		return fmt.Errorf("read job %q: %w", job.ID, err)
@@ -189,7 +189,7 @@ func tailLines(output string, count int) string {
 	return strings.Join(lines[len(lines)-count:], "")
 }
 
-func executeJobWaitCLI(client *daemon.Client, job daemon.Job, stdout io.Writer) error {
+func executeJobWait(client *daemon.Client, job daemon.Job, stdout io.Writer) error {
 	current := job
 	var err error
 	for !current.Done() {
@@ -205,7 +205,7 @@ func executeJobWaitCLI(client *daemon.Client, job daemon.Job, stdout io.Writer) 
 	return jobResultError(current)
 }
 
-func executeJobInspectCLI(job daemon.Job, jsonOutput bool, stdout io.Writer) error {
+func executeJobInspect(job daemon.Job, jsonOutput bool, stdout io.Writer) error {
 	if jsonOutput {
 		return writeJSON(stdout, job, false)
 	}
@@ -242,7 +242,7 @@ func formatJobTime(value time.Time) string {
 	return value.Local().Format(time.RFC3339)
 }
 
-func executeJobPruneCLI(client *daemon.Client, options jobPruneOptions, stdin io.Reader, stdout, stderr io.Writer) error {
+func executeJobPrune(client *daemon.Client, options jobPruneOptions, stdin io.Reader, stdout, stderr io.Writer) error {
 	jobs, err := client.Jobs()
 	if err != nil {
 		return fmt.Errorf("list jobs: %w", err)
@@ -380,7 +380,7 @@ func (a *cliApp) newJobsCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return executeJobsCLI(workspace, options, a.stdout)
+			return executeJobs(workspace, options, a.stdout)
 		},
 	}
 	cmd.Flags().BoolVarP(&options.all, "all", "a", false, "Include completed jobs")
@@ -504,7 +504,7 @@ func (a *cliApp) newJobPruneCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return executeJobPruneCLI(daemon.NewClient(workspace), options, a.stdin, a.stdout, a.stderr)
+			return executeJobPrune(daemon.NewClient(workspace), options, a.stdin, a.stdout, a.stderr)
 		},
 	}
 	cmd.Flags().StringVar(&statusValue, "status", "", "Remove only jobs with this completed status")

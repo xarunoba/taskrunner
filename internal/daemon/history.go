@@ -41,7 +41,7 @@ func loadJobHistory(workspace string) (map[string]*jobRecord, []string, error) {
 			return nil, nil, fmt.Errorf("decode job %q: invalid job id", entry.Name())
 		}
 		record := &jobRecord{Job: job}
-		record.output.Set(job.Output)
+		record.output.store(job.Output)
 		record.Job.Output = ""
 		if record.Status == StatusQueued || record.Status == StatusRunning {
 			record.Status = StatusFailed
@@ -69,7 +69,7 @@ func (s *server) persistLocked(record *jobRecord) error {
 		return fmt.Errorf("create job history: %w", err)
 	}
 	job := record.Job
-	job.Output, job.OutputSize = record.output.Slice(0)
+	job.Output, job.OutputSize = record.output.from(0)
 	path := filepath.Join(dir, record.ID+".json")
 	if err := atomicfile.WriteJSON(path, 0o600, job); err != nil {
 		return fmt.Errorf("save job: %w", err)

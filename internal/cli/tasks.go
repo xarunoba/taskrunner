@@ -23,7 +23,7 @@ type taskView struct {
 	JobPolicy task.JobPolicy `json:"job_policy,omitempty"`
 }
 
-func executeTasksCLI(items []task.Task, jsonOutput bool, stdout io.Writer) error {
+func executeTasks(items []task.Task, jsonOutput bool, stdout io.Writer) error {
 	if jsonOutput {
 		views := make([]taskView, len(items))
 		for i, item := range items {
@@ -55,11 +55,11 @@ func executeTasksCLI(items []task.Task, jsonOutput bool, stdout io.Writer) error
 	return nil
 }
 
-func executeTaskShowCLI(item task.Task, jsonOutput bool, stdout io.Writer) error {
+func executeTaskShow(item task.Task, jsonOutput bool, stdout io.Writer) error {
 	return writeJSON(stdout, newTaskView(item), !jsonOutput)
 }
 
-func executeTaskValidateCLI(items []task.Task, name string) error {
+func executeTaskValidate(items []task.Task, name string) error {
 	if name != "" {
 		item, err := findTask(items, name)
 		if err != nil {
@@ -75,7 +75,7 @@ func executeTaskValidateCLI(items []task.Task, name string) error {
 	return nil
 }
 
-func executeTaskRemoveCLI(store *task.Store, items []task.Task, name string, force bool, stdin io.Reader, stdout, stderr io.Writer) error {
+func executeTaskRemove(store *task.Store, items []task.Task, name string, force bool, stdin io.Reader, stdout, stderr io.Writer) error {
 	item, err := findTask(items, name)
 	if err != nil {
 		return err
@@ -190,7 +190,7 @@ func (a *cliApp) newTasksCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return executeTasksCLI(items, jsonOutput, a.stdout)
+			return executeTasks(items, jsonOutput, a.stdout)
 		},
 	}
 	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Emit a JSON array")
@@ -225,7 +225,7 @@ func (a *cliApp) newTaskShowCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return executeTaskShowCLI(item, jsonOutput, a.stdout)
+			return executeTaskShow(item, jsonOutput, a.stdout)
 		},
 	}
 	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Emit compact JSON")
@@ -246,7 +246,7 @@ func (a *cliApp) newTaskValidateCommand() *cobra.Command {
 			if len(args) == 1 {
 				name = args[0]
 			}
-			return executeTaskValidateCLI(items, name)
+			return executeTaskValidate(items, name)
 		},
 	}
 }
@@ -262,7 +262,7 @@ func (a *cliApp) newTaskRemoveCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return executeTaskRemoveCLI(store, items, args[0], force, a.stdin, a.stdout, a.stderr)
+			return executeTaskRemove(store, items, args[0], force, a.stdin, a.stdout, a.stderr)
 		},
 	}
 	cmd.Flags().BoolVar(&force, "force", false, "Remove without interactive confirmation")

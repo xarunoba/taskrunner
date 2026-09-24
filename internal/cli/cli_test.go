@@ -182,8 +182,8 @@ func TestExecuteTaskCLIUsesPreparedValues(t *testing.T) {
 	}
 
 	var output bytes.Buffer
-	if err := executeTaskCLI(workspace, item, values, taskRunOptions{}, &output, &output); err != nil {
-		t.Fatalf("executeTaskCLI() error = %v", err)
+	if err := executeTask(workspace, item, values, taskRunOptions{}, &output, &output); err != nil {
+		t.Fatalf("executeTask() error = %v", err)
 	}
 	if got, want := output.String(), "hello world||"; got != want {
 		t.Fatalf("output = %q, want %q", got, want)
@@ -217,8 +217,8 @@ func TestJobCLIListsActiveJobsAndManagesHistory(t *testing.T) {
 	}
 
 	var output bytes.Buffer
-	if err := executeJobsCLI(workspace, jobListOptions{}, &output); err != nil {
-		t.Fatalf("executeJobsCLI(active) error = %v", err)
+	if err := executeJobs(workspace, jobListOptions{}, &output); err != nil {
+		t.Fatalf("executeJobs(active) error = %v", err)
 	}
 	if !strings.Contains(output.String(), active.ShortID()) {
 		t.Fatalf("active jobs output does not contain %q:\n%s", active.ShortID(), output.String())
@@ -228,8 +228,8 @@ func TestJobCLIListsActiveJobsAndManagesHistory(t *testing.T) {
 	}
 
 	output.Reset()
-	if err := executeJobsCLI(workspace, jobListOptions{all: true}, &output); err != nil {
-		t.Fatalf("executeJobsCLI(all) error = %v", err)
+	if err := executeJobs(workspace, jobListOptions{all: true}, &output); err != nil {
+		t.Fatalf("executeJobs(all) error = %v", err)
 	}
 	for _, job := range []daemon.Job{completed, active} {
 		if !strings.Contains(output.String(), job.ShortID()) {

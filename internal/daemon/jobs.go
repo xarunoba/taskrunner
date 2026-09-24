@@ -27,14 +27,14 @@ func (b *synchronizedBuffer) Write(data []byte) (int, error) {
 	return b.b.Write(data)
 }
 
-func (b *synchronizedBuffer) Set(value string) {
+func (b *synchronizedBuffer) store(value string) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.b.Reset()
 	b.b.WriteString(value)
 }
 
-func (b *synchronizedBuffer) Slice(offset int) (string, int) {
+func (b *synchronizedBuffer) from(offset int) (string, int) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	data := b.b.Bytes()
@@ -96,9 +96,9 @@ func (s *server) startJobLocked(taskID, name, command string, policy task.JobPol
 func (s *server) snapshotLocked(record *jobRecord, outputOffset int, includeOutput bool) Job {
 	job := record.Job
 	if includeOutput {
-		job.Output, job.OutputSize = record.output.Slice(outputOffset)
+		job.Output, job.OutputSize = record.output.from(outputOffset)
 	} else {
-		_, job.OutputSize = record.output.Slice(0)
+		_, job.OutputSize = record.output.from(0)
 	}
 	return job
 }

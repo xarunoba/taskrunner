@@ -55,7 +55,7 @@ func (a *cliApp) newRunCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return executeTaskCLI(workspace, item, values, options, a.stdout, a.stderr)
+			return executeTask(workspace, item, values, options, a.stdout, a.stderr)
 		},
 	}
 	cmd.Flags().StringArrayVar(&options.assignments, "set", nil, "Set a task field as key=value; repeatable")
@@ -134,7 +134,7 @@ func prepareTaskValues(item task.Task, supplied map[string]string) (map[string]s
 	return values, nil
 }
 
-func executeTaskCLI(workspace string, item task.Task, values map[string]string, options taskRunOptions, stdout, stderr io.Writer) error {
+func executeTask(workspace string, item task.Task, values map[string]string, options taskRunOptions, stdout, stderr io.Writer) error {
 	command, err := item.Render(values)
 	if err != nil {
 		return err

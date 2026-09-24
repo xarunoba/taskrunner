@@ -70,8 +70,8 @@ func TestTaskCommandsExposeAndRemovePersistedDefinitions(t *testing.T) {
 	}
 
 	var output bytes.Buffer
-	if err := executeTasksCLI(items, true, &output); err != nil {
-		t.Fatalf("executeTasksCLI() error = %v", err)
+	if err := executeTasks(items, true, &output); err != nil {
+		t.Fatalf("executeTasks() error = %v", err)
 	}
 	var listed []taskView
 	if err := json.Unmarshal(output.Bytes(), &listed); err != nil {
@@ -81,10 +81,10 @@ func TestTaskCommandsExposeAndRemovePersistedDefinitions(t *testing.T) {
 		t.Fatalf("listed tasks = %#v, want saved task", listed)
 	}
 
-	if err := executeTaskRemoveCLI(store, items, "Build", false, strings.NewReader("yes\n"), &output, &output); err == nil || !strings.Contains(err.Error(), "use --force") {
+	if err := executeTaskRemove(store, items, "Build", false, strings.NewReader("yes\n"), &output, &output); err == nil || !strings.Contains(err.Error(), "use --force") {
 		t.Fatalf("nonterminal task removal error = %v", err)
 	}
-	if err := executeTaskRemoveCLI(store, items, "Build", true, strings.NewReader(""), &output, &output); err != nil {
+	if err := executeTaskRemove(store, items, "Build", true, strings.NewReader(""), &output, &output); err != nil {
 		t.Fatalf("forced task removal: %v", err)
 	}
 	items, err = store.Load()
@@ -110,8 +110,8 @@ func TestDryRunQuotesValuesAndWarnsForRawFields(t *testing.T) {
 	values := map[string]string{"version": "release candidate", "flags": "--force"}
 	var stdout, stderr bytes.Buffer
 	options := taskRunOptions{dryRun: true, quiet: true}
-	if err := executeTaskCLI(t.TempDir(), item, values, options, &stdout, &stderr); err != nil {
-		t.Fatalf("executeTaskCLI(dry-run) error = %v", err)
+	if err := executeTask(t.TempDir(), item, values, options, &stdout, &stderr); err != nil {
+		t.Fatalf("executeTask(dry-run) error = %v", err)
 	}
 	if got, want := stdout.String(), "deploy 'release candidate' --force\n"; got != want {
 		t.Fatalf("dry-run output = %q, want %q", got, want)
@@ -163,8 +163,8 @@ func TestJobPruneRemovesOnlyMatchingCompletedJobs(t *testing.T) {
 
 	var output bytes.Buffer
 	options := jobPruneOptions{status: daemon.StatusSucceeded, force: true}
-	if err := executeJobPruneCLI(client, options, strings.NewReader(""), &output, &output); err != nil {
-		t.Fatalf("executeJobPruneCLI() error = %v", err)
+	if err := executeJobPrune(client, options, strings.NewReader(""), &output, &output); err != nil {
+		t.Fatalf("executeJobPrune() error = %v", err)
 	}
 	jobs, err := client.Jobs()
 	if err != nil {

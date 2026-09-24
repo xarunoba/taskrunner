@@ -33,7 +33,7 @@ func NewClient(workspace string) *Client {
 }
 
 func (c *Client) Start(taskID, name, command string, policy task.JobPolicy) (Job, error) {
-	result, err := c.do(request{
+	result, err := c.roundTrip(request{
 		Action:    "start",
 		TaskID:    taskID,
 		Name:      name,
@@ -50,7 +50,7 @@ func (c *Client) Start(taskID, name, command string, policy task.JobPolicy) (Job
 }
 
 func (c *Client) Jobs() ([]Job, error) {
-	result, err := c.do(request{Action: "list"})
+	result, err := c.roundTrip(request{Action: "list"})
 	if err != nil {
 		return nil, err
 	}
@@ -58,7 +58,7 @@ func (c *Client) Jobs() ([]Job, error) {
 }
 
 func (c *Client) Job(id string, outputOffset int) (Job, error) {
-	result, err := c.do(request{Action: "get", JobID: id, OutputOffset: outputOffset})
+	result, err := c.roundTrip(request{Action: "get", JobID: id, OutputOffset: outputOffset})
 	if err != nil {
 		return Job{}, err
 	}
@@ -81,7 +81,7 @@ func (c *Client) Remove(id string) (Job, error) {
 }
 
 func (c *Client) jobAction(action, id string) (Job, error) {
-	result, err := c.do(request{Action: action, JobID: id})
+	result, err := c.roundTrip(request{Action: action, JobID: id})
 	if err != nil {
 		return Job{}, err
 	}
@@ -91,7 +91,7 @@ func (c *Client) jobAction(action, id string) (Job, error) {
 	return *result.Job, nil
 }
 
-func (c *Client) do(message request) (response, error) {
+func (c *Client) roundTrip(message request) (response, error) {
 	conn, err := net.DialTimeout("unix", c.socket, retryInterval)
 	if err != nil {
 		if err := c.startDaemon(); err != nil {
