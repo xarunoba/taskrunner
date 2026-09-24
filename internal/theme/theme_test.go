@@ -414,6 +414,58 @@ func TestCreateDefaultIfMissingOnlyWhenMissing(t *testing.T) {
 		}
 	})
 
+	t.Run("unstamped previous generated palette is refreshed", func(t *testing.T) {
+		t.Parallel()
+
+		root := t.TempDir()
+		writeTheme(t, root, "default", `{"colors": {"accent": "42", "muted": "245", "cursor": "50", "error": "203", "selection": {"foreground": "0", "background": "72"}, "inactive_tab": {"foreground": "245", "background": "238"}, "status": {"foreground": "252", "background": "235"}, "error_badge": {"foreground": "231", "background": "160"}, "queued": {"foreground": "0", "background": "74"}, "succeeded": {"foreground": "0", "background": "35"}, "canceled": {"foreground": "250", "background": "240"}}}`)
+		if err := NewStore(root).CreateDefaultIfMissing(); err != nil {
+			t.Fatalf("create default: %v", err)
+		}
+		raw, err := os.ReadFile(filepath.Join(root, "themes", "default.json"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var generated generatedDefaultFile
+		if err := json.Unmarshal(raw, &generated); err != nil {
+			t.Fatal(err)
+		}
+		if generated.Revision != currentDefaultRevision || generated.Palette != Default().Palette {
+			t.Fatalf("unstamped palette was not refreshed: %#v", generated.Palette)
+		}
+	})
+
+	t.Run("stamped current default theme is untouched", func(t *testing.T) {
+		t.Parallel()
+
+		root := t.TempDir()
+		palette := Default().Palette
+		palette.Accent = "200"
+		raw, err := json.Marshal(generatedDefaultFile{
+			Generated: true,
+			Revision:  currentDefaultRevision,
+			Palette:   palette,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		writeTheme(t, root, "default", string(raw))
+		before, err := os.ReadFile(filepath.Join(root, "themes", "default.json"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := NewStore(root).CreateDefaultIfMissing(); err != nil {
+			t.Fatalf("create default: %v", err)
+		}
+		after, err := os.ReadFile(filepath.Join(root, "themes", "default.json"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(after) != string(before) {
+			t.Fatalf("stamped current file was rewritten: %s", after)
+		}
+	})
+
 	t.Run("malformed config is untouched", func(t *testing.T) {
 		t.Parallel()
 

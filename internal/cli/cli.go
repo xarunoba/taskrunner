@@ -102,12 +102,12 @@ func (a *cliApp) runTUI(taskName string, create bool) error {
 	if err != nil {
 		return fmt.Errorf("open theme store: %w", err)
 	}
+	if err := themes.CreateDefaultIfMissing(); err != nil {
+		return fmt.Errorf("prepare configuration: %w", err)
+	}
 	selected, err := themes.Load()
 	if err != nil {
 		return fmt.Errorf("load theme: %w", err)
-	}
-	if err := themes.CreateDefaultIfMissing(); err != nil {
-		return fmt.Errorf("prepare configuration: %w", err)
 	}
 	if create {
 		return tui.Create(store, items, themes, selected, a.stdin, a.stdout)
