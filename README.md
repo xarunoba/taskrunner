@@ -211,7 +211,7 @@ Field values are shell-quoted by default, so shell syntax in a value stays liter
 
 ## Configuration
 
-Display preferences apply across your workspaces. Taskrunner reads them from `$XDG_CONFIG_HOME/taskrunner/`, or `~/.config/taskrunner/` when `XDG_CONFIG_HOME` is unset. Without a configuration file, the TUI uses the built-in `default` theme with green accents.
+Display preferences apply across your workspaces. Taskrunner reads them from `$XDG_CONFIG_HOME/taskrunner/`, or `~/.config/taskrunner/` when `XDG_CONFIG_HOME` is unset. Opening the TUI creates `config.json` with the default theme if the file does not exist; an existing file is never touched at startup, and a malformed one is reported as an error. Without a configuration file, the TUI uses the built-in `default` theme with green accents.
 
 `config.json` selects the theme:
 

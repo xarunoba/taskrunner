@@ -267,6 +267,58 @@ func TestSelectReplacesOnlyThemeKey(t *testing.T) {
 	}
 }
 
+func TestCreateDefaultIfMissingOnlyWhenMissing(t *testing.T) {
+	t.Parallel()
+
+	t.Run("missing config is created with the default theme", func(t *testing.T) {
+		t.Parallel()
+
+		root := t.TempDir()
+		store := NewStore(root)
+		if err := store.CreateDefaultIfMissing(); err != nil {
+			t.Fatalf("create default: %v", err)
+		}
+		if raw := readConfig(t, root); !strings.Contains(raw, `"theme": "default"`) {
+			t.Fatalf("config = %s, want persisted default theme", raw)
+		}
+		selected, err := store.Load()
+		if err != nil {
+			t.Fatalf("load: %v", err)
+		}
+		if selected != Default() {
+			t.Fatalf("loaded %#v, want %#v", selected, Default())
+		}
+	})
+
+	t.Run("existing config with unknown keys is untouched", func(t *testing.T) {
+		t.Parallel()
+
+		root := t.TempDir()
+		writeConfig(t, root, `{"theme":"violet","future-setting":42}`)
+		before := readConfig(t, root)
+		if err := NewStore(root).CreateDefaultIfMissing(); err != nil {
+			t.Fatalf("create default: %v", err)
+		}
+		if after := readConfig(t, root); after != before {
+			t.Fatalf("ensure rewrote the config: %s", after)
+		}
+	})
+
+	t.Run("malformed config is untouched", func(t *testing.T) {
+		t.Parallel()
+
+		root := t.TempDir()
+		writeConfig(t, root, `{not json`)
+		before := readConfig(t, root)
+		if err := NewStore(root).CreateDefaultIfMissing(); err != nil {
+			t.Fatalf("create default: %v", err)
+		}
+		if after := readConfig(t, root); after != before {
+			t.Fatalf("ensure rewrote a malformed config: %s", after)
+		}
+	})
+}
+
 func TestSelectWritesAtomicFilePermissions(t *testing.T) {
 	t.Parallel()
 

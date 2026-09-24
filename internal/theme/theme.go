@@ -99,6 +99,22 @@ func (s *Store) themesPath(name string) (string, error) {
 	return filepath.Join(s.root, "themes", name+".json"), nil
 }
 
+// CreateDefaultIfMissing persists the default configuration when no configuration file
+// exists. An existing file, including a malformed one, is left untouched.
+func (s *Store) CreateDefaultIfMissing() error {
+	_, err := os.Stat(s.configPath())
+	switch {
+	case err == nil:
+		return nil
+	case !errors.Is(err, fs.ErrNotExist):
+		return fmt.Errorf("stat %s: %w", s.configPath(), err)
+	}
+	if _, err := s.Select(defaultName); err != nil {
+		return fmt.Errorf("create %s: %w", s.configPath(), err)
+	}
+	return nil
+}
+
 // Load returns the configured theme, or Default when no configuration exists.
 // A missing configuration never creates the configuration directory.
 func (s *Store) Load() (Theme, error) {
