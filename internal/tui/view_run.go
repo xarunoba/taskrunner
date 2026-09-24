@@ -43,8 +43,8 @@ func (m model) runFormHeader(field task.Field) string {
 }
 
 // runFormListHeight is the number of rows left for the scrollable list after
-// the dynamically sized header. It replaces the old fixed offset so short
-// terminals and raw/optional fields size the window from actual content.
+// the dynamically sized header, so short terminals and raw/optional fields
+// size the window from actual content.
 func (m model) runFormListHeight() int {
 	if m.runIndex >= len(m.runTask.Fields) {
 		return m.contentHeight()

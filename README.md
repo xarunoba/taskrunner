@@ -1,10 +1,10 @@
 # Taskrunner
 
-Taskrunner runs workspace-specific shell commands from a terminal UI or direct CLI commands. Create tasks once with prompts (text, choice, file picker, confirmation), then run them interactively or from scripts, with live logs and a background daemon so jobs keep running after you close the terminal.
+Taskrunner saves shell commands as tasks you can run from a terminal UI or the command line. Tasks can prompt for text, choices, files, and confirmations. You can watch job output live, and jobs keep running after you close the terminal.
 
 ## Requirements
 
-- Go 1.27 or newer
+- Go 1.27.1 or newer
 - Linux: the job daemon communicates over a Unix domain socket
 
 Taskrunner executes commands through `$SHELL -c`. It uses `/bin/sh` when `$SHELL` is empty.
@@ -21,7 +21,7 @@ Or build a binary in the repository:
 go build -o taskrunner .
 ```
 
-Run Taskrunner from the workspace whose tasks you want to use. The current working directory is the workspace:
+Run Taskrunner from your workspace directory:
 
 ```sh
 taskrunner
@@ -31,13 +31,11 @@ taskrunner
 
 Run `taskrunner` without arguments to open the **Tasks** tab. Press `?` for keybinds on the current screen. While editing text, use `F1` for keybinds, `F4` for Settings, and `Ctrl+C` to quit.
 
-Footer buttons show `<keybind> <descriptor>`: **esc back**, **s settings**, and **? keybinds**. During text entry, the latter two show **f4 settings** and **f1 keybinds**. Modals show **esc close**; direct create/edit screens show **esc cancel**. Buttons wrap onto extra footer rows in narrow terminals. Clicking a button performs the same action as its displayed key.
+Footer buttons show their shortcuts: `esc back`, `s settings`, and `? keybinds`. During text entry, Settings and keybinds use `f4` and `f1` so you can type `s` and `?`. Modals use `esc close`; direct create/edit screens use `esc cancel`. Buttons wrap in narrow terminals. Click a button or press its displayed key.
 
-Overflowing lists, pickers, editors, help, and logs show a right-edge position bar. It disappears when the content fits. The bar is an indicator, not a draggable control; use the keyboard or mouse wheel to navigate. Editors keep the focused control visible as you move forward or backward.
+Lists, pickers, editors, help, and logs show a position bar on the right when content extends beyond the visible area. Use the keyboard or mouse wheel to scroll; the bar cannot be dragged. Editors keep the focused control visible as you move forward or backward.
 
 ### Settings
-
-Press `s` outside text entry, press `F4`, or click the Settings footer button to open the Settings modal. `Esc`, `s`, or the **esc close** button closes it.
 
 | Input | Action |
 | --- | --- |
@@ -47,7 +45,7 @@ Press `s` outside text entry, press `F4`, or click the Settings footer button to
 | `Esc` / `s` / **esc close** | Close Settings |
 | Mouse | Click a row's label for the previous value or its value for the next |
 
-The **Theme** choice applies immediately and saves to the configuration file; see [Configuration](#configuration).
+Changing **Theme** applies it immediately and saves your choice; see [Configuration](#configuration).
 
 ### Tasks
 
@@ -64,7 +62,7 @@ The **Theme** choice applies immediately and saves to the configuration file; se
 
 ### Task editor
 
-The editor walks you through the command, an optional job policy, and any prompt fields; fields can reference earlier answers (for example a confirmation label like `Deploy {{version}} to {{environment}}?`).
+Use the editor to set the command, job policy, and prompt fields. Field labels can use earlier answers, such as `Deploy {{version}} to {{environment}}?`.
 
 | Input | Action |
 | --- | --- |
@@ -77,7 +75,7 @@ The editor walks you through the command, an optional job policy, and any prompt
 | `F2` or `Ctrl+S` | Save the task |
 | `Esc` | Cancel |
 
-In the command editor, `↑` on the first displayed line moves to Fields, and `↓` on the last displayed line moves to Job policy. Otherwise, the arrows move the cursor within the command. Wrapped lines count as displayed lines; leaving the editor preserves the command and cursor position.
+In the command editor, `↑` on the first displayed line moves to Fields, and `↓` on the last moves to Job policy. Otherwise, the arrows move the cursor within the command, including wrapped lines. Leaving the editor preserves the command and cursor position.
 
 Fields run in their displayed order and can be required or optional. Field values are shell-quoted before substitution, so spaces and special characters stay part of one argument.
 
@@ -91,11 +89,15 @@ Fields run in their displayed order and can be required or optional. Field value
 | `Esc` | Cancel the run |
 | Mouse | Select a file or control; click **Skip** for an optional file field |
 
-Moving backward preserves values already entered. Recent values per field are remembered, so repeated runs pick up where you left off.
+Moving backward preserves the values you entered. Taskrunner also saves recent values for each field so you can reuse them on later runs.
 
 ### Jobs and logs
 
-Taskrunner starts a workspace daemon on demand, so a job continues after the TUI closes. Each task has one of three job policies: **Sequential** (default; queues new jobs until older ones finish), **Parallel** (starts every job immediately), or **Cancel previous** (cancels older jobs, then starts the new one).
+Taskrunner starts a workspace daemon when needed, so jobs continue after the TUI closes. Each task has one of three job policies:
+
+- **Sequential** (default): Queue new jobs until older ones finish.
+- **Parallel**: Start every job immediately.
+- **Cancel previous**: Cancel older jobs, then start the new one.
 
 The **Tasks** tab marks running and queued jobs and shows the latest result for idle tasks. The **Jobs** tab lists every job with its status, command, timestamps, and log.
 
@@ -141,7 +143,7 @@ taskrunner job prune [--status <status>] [--before <age>] [--force]
 taskrunner completion <bash|zsh|fish>
 ```
 
-Every command provides contextual help via `--help` or `taskrunner help <command>`.
+Use `--help` or `taskrunner help <command>` for command help.
 
 ### Run tasks
 
@@ -157,18 +159,21 @@ taskrunner run "Deploy" \
 Use `--detach` to print the new job ID and return immediately:
 
 ```sh
-job_id=$(taskrunner run "Deploy" --detach --set environment=staging)
+job_id=$(taskrunner run "Deploy" --detach \
+  --set environment=staging \
+  --set version=1.4.0 \
+  --set confirmed=true)
 taskrunner job wait "$job_id"
 ```
 
 Use `--dry-run` to validate values and print the rendered command without creating a job.
 
-Task names match case-insensitively by display name or filename. Direct runs require every required field; choice values must match a configured option, and unknown keys are rejected.
+Select a task by name or filename; matching ignores case. Direct runs need a value for every required field. Choice values must match a configured option, and unknown field keys are rejected.
 
 ### Manage tasks and jobs
 
 - `taskrunner tasks` lists tasks; `taskrunner task show` prints one task; `taskrunner task validate` checks one task or every task; `taskrunner task rm` removes a task.
-- `taskrunner jobs` lists jobs (newest first) with `--status`, `--task`, `--limit`, and `--json`/`--quiet` filters.
+- `taskrunner jobs` lists jobs, newest first. Filter with `--status` and `--task`, cap the count with `--limit`, and choose the output format with `--json` or `--quiet`.
 - Job arguments accept a full ID or a unique prefix or suffix, including the short ID printed by the table.
 - `taskrunner job logs --follow` streams a job until it finishes; `taskrunner job wait` exits with the job result.
 - `taskrunner job cancel`, `rerun`, `rm`, and `prune` manage the job list. Interactive removal and pruning ask for confirmation; scripts pass `--force`.
@@ -185,7 +190,7 @@ taskrunner completion fish
 
 ## Tasks
 
-Tasks live in `.taskrunner/` inside the workspace, one JSON file per task. You normally never edit them by hand: `taskrunner create` and `taskrunner edit` open a guided editor, and `taskrunner task show <task>` prints the current definition. A task is a command with `{{placeholders}}` plus the fields that fill them in:
+Tasks live in `.taskrunner/tasks/`, one JSON file per task. Use `taskrunner create` and `taskrunner edit` to open the editor, or edit the JSON directly. `taskrunner task show <task>` prints the saved definition. Each task has a command with `{{placeholders}}` and fields that supply their values:
 
 ```json
 {
@@ -202,11 +207,11 @@ Tasks live in `.taskrunner/` inside the workspace, one JSON file per task. You n
 
 To share a task, copy its JSON file into `.taskrunner/tasks/` in another workspace. Every task is validated when loaded, and malformed files are reported by filename.
 
-Field values are shell-quoted before substitution, so task files cannot accidentally inject shell syntax. A field can deliberately opt out for trusted shell snippets; the TUI marks such fields and warns before execution.
+Field values are shell-quoted by default, so shell syntax in a value stays literal. Set `"raw": true` on a field only when you intend to insert trusted shell syntax. The TUI marks raw fields and warns before execution.
 
 ## Configuration
 
-Display preferences are per user, not per workspace. Taskrunner reads them from the XDG configuration directory: `$XDG_CONFIG_HOME/taskrunner/`, or `~/.config/taskrunner/` when `XDG_CONFIG_HOME` is unset. Without a configuration file, the TUI uses the built-in `default` theme (green accents).
+Display preferences apply across your workspaces. Taskrunner reads them from `$XDG_CONFIG_HOME/taskrunner/`, or `~/.config/taskrunner/` when `XDG_CONFIG_HOME` is unset. Without a configuration file, the TUI uses the built-in `default` theme with green accents.
 
 `config.json` selects the theme:
 
@@ -214,7 +219,7 @@ Display preferences are per user, not per workspace. Taskrunner reads them from 
 { "theme": "violet" }
 ```
 
-Custom themes live in `themes/<name>.json`; the file name is the theme name. Names may contain only letters, digits, `_`, and `-`. A theme defines every color role the TUI renders; scalar roles take one color and pair roles take a `foreground` and `background` color. Colors are ANSI 256 numbers or hex values:
+Save custom themes as `themes/<name>.json` in the configuration directory. The filename sets the theme name and may contain only letters, digits, `_`, and `-` before `.json`. Include every color entry shown below. Each entry takes either a single color or a `foreground` and `background` pair. Colors can be ANSI 256 numbers or hex values:
 
 ```json
 {
@@ -234,7 +239,7 @@ Custom themes live in `themes/<name>.json`; the file name is the theme name. Nam
 }
 ```
 
-Choosing a theme in Settings writes only the `theme` key and keeps every other top-level key in `config.json`. A malformed `config.json` is reported at startup instead of being overwritten. Settings enumerates themes from valid files in the `themes` directory in lexical order after `default`.
+Choosing a theme in Settings updates only the `theme` key in `config.json`; other top-level keys stay unchanged. If `config.json` is malformed, Taskrunner reports the error at startup and leaves the file untouched. Settings lists `default` first, then valid custom themes sorted by name.
 
 ## Development
 

@@ -432,7 +432,7 @@ func (a *cliApp) newJobLogsCommand() *cobra.Command {
 		},
 	}
 	cmd.Flags().BoolVarP(&options.follow, "follow", "f", false, "Follow output until the job finishes")
-	cmd.Flags().IntVar(&options.tail, "tail", -1, "Print only the final number of existing lines")
+	cmd.Flags().IntVar(&options.tail, "tail", -1, "Print only the last N lines of output")
 	return cmd
 }
 
@@ -508,7 +508,7 @@ func (a *cliApp) newJobPruneCommand() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&statusValue, "status", "", "Remove only jobs with this completed status")
-	cmd.Flags().StringVar(&beforeValue, "before", "", "Remove jobs older than an age such as 24h or 7d")
+	cmd.Flags().StringVar(&beforeValue, "before", "", "Remove jobs older than a duration such as 24h or 7d")
 	cmd.Flags().BoolVar(&options.force, "force", false, "Remove without interactive confirmation")
 	return cmd
 }
