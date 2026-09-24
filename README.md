@@ -219,7 +219,7 @@ Display preferences apply across your workspaces. Taskrunner reads them from `$X
 { "theme": "violet" }
 ```
 
-`themes/default.json` overrides the built-in `default` theme: name only the roles you want to change; unnamed roles keep their built-in values. Unknown color names are rejected.
+`themes/default.json` overrides the built-in `default` theme: name only the roles you want to change; unnamed roles keep their built-in values. Unknown color names are rejected. Opening the TUI generates this file with every built-in role if it does not exist, so you can edit roles from a working file.
 
 Save custom themes as `themes/<name>.json` in the configuration directory. The filename sets the theme name and may contain only letters, digits, `_`, and `-` before `.json`. Include every color entry shown below. Each entry takes either a single color or a `foreground` and `background` pair. Colors can be ANSI 256 numbers or hex values:
 

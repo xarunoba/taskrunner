@@ -1,6 +1,7 @@
 package theme
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -288,6 +289,17 @@ func TestCreateDefaultIfMissingOnlyWhenMissing(t *testing.T) {
 		if selected != Default() {
 			t.Fatalf("loaded %#v, want %#v", selected, Default())
 		}
+		raw, err := os.ReadFile(filepath.Join(root, "themes", "default.json"))
+		if err != nil {
+			t.Fatalf("read default theme: %v", err)
+		}
+		var generated Theme
+		if err := json.Unmarshal(raw, &generated); err != nil {
+			t.Fatalf("decode generated default theme: %v", err)
+		}
+		if generated.Palette != Default().Palette {
+			t.Fatalf("generated palette %#v, want %#v", generated.Palette, Default().Palette)
+		}
 	})
 
 	t.Run("existing config with unknown keys is untouched", func(t *testing.T) {
@@ -300,7 +312,49 @@ func TestCreateDefaultIfMissingOnlyWhenMissing(t *testing.T) {
 			t.Fatalf("create default: %v", err)
 		}
 		if after := readConfig(t, root); after != before {
-			t.Fatalf("ensure rewrote the config: %s", after)
+			t.Fatalf("CreateDefaultIfMissing rewrote the config: %s", after)
+		}
+	})
+
+	t.Run("existing default theme file is untouched", func(t *testing.T) {
+		t.Parallel()
+
+		root := t.TempDir()
+		writeTheme(t, root, "default", `{"colors": {"accent": "200"}}`)
+		before, err := os.ReadFile(filepath.Join(root, "themes", "default.json"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := NewStore(root).CreateDefaultIfMissing(); err != nil {
+			t.Fatalf("create default: %v", err)
+		}
+		after, err := os.ReadFile(filepath.Join(root, "themes", "default.json"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(after) != string(before) {
+			t.Fatalf("CreateDefaultIfMissing rewrote themes/default.json: %s", after)
+		}
+	})
+
+	t.Run("missing default theme file is generated with existing config", func(t *testing.T) {
+		t.Parallel()
+
+		root := t.TempDir()
+		writeConfig(t, root, `{"theme":"default","future-setting":42}`)
+		if err := NewStore(root).CreateDefaultIfMissing(); err != nil {
+			t.Fatalf("create default: %v", err)
+		}
+		raw, err := os.ReadFile(filepath.Join(root, "themes", "default.json"))
+		if err != nil {
+			t.Fatalf("read generated default theme: %v", err)
+		}
+		var generated Theme
+		if err := json.Unmarshal(raw, &generated); err != nil {
+			t.Fatalf("decode generated default theme: %v", err)
+		}
+		if generated.Palette != Default().Palette {
+			t.Fatalf("generated palette %#v, want %#v", generated.Palette, Default().Palette)
 		}
 	})
 
@@ -314,7 +368,7 @@ func TestCreateDefaultIfMissingOnlyWhenMissing(t *testing.T) {
 			t.Fatalf("create default: %v", err)
 		}
 		if after := readConfig(t, root); after != before {
-			t.Fatalf("ensure rewrote a malformed config: %s", after)
+			t.Fatalf("CreateDefaultIfMissing rewrote a malformed config: %s", after)
 		}
 	})
 }

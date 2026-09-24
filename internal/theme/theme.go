@@ -99,9 +99,19 @@ func (s *Store) themesPath(name string) (string, error) {
 	return filepath.Join(s.root, "themes", name+".json"), nil
 }
 
-// CreateDefaultIfMissing persists the default configuration when no configuration file
-// exists. An existing file, including a malformed one, is left untouched.
+// CreateDefaultIfMissing persists the default configuration and a default
+// theme file when either is missing. Existing files, including malformed
+// ones, are left untouched. The generated themes/default.json lists every
+// built-in color role so users can edit individual roles from a working
+// file.
 func (s *Store) CreateDefaultIfMissing() error {
+	if err := s.createConfigIfMissing(); err != nil {
+		return err
+	}
+	return s.createDefaultThemeIfMissing()
+}
+
+func (s *Store) createConfigIfMissing() error {
 	_, err := os.Stat(s.configPath())
 	switch {
 	case err == nil:
@@ -111,6 +121,25 @@ func (s *Store) CreateDefaultIfMissing() error {
 	}
 	if _, err := s.Select(defaultName); err != nil {
 		return fmt.Errorf("create %s: %w", s.configPath(), err)
+	}
+	return nil
+}
+
+func (s *Store) createDefaultThemeIfMissing() error {
+	path, err := s.themesPath(defaultName)
+	if err != nil {
+		return err
+	}
+	if _, err := os.Stat(path); err == nil {
+		return nil
+	} else if !errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("stat %s: %w", path, err)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return fmt.Errorf("create %s: %w", filepath.Dir(path), err)
+	}
+	if err := atomicfile.WriteJSON(path, 0o600, Default()); err != nil {
+		return fmt.Errorf("write %s: %w", path, err)
 	}
 	return nil
 }
