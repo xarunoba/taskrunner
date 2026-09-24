@@ -120,7 +120,7 @@ func (s *Store) CreateDefaultIfMissing() error {
 func (s *Store) Load() (Theme, error) {
 	raw, err := os.ReadFile(s.configPath())
 	if errors.Is(err, fs.ErrNotExist) {
-		return Default(), nil
+		return s.load(defaultName)
 	}
 	if err != nil {
 		return Theme{}, fmt.Errorf("read %s: %w", s.configPath(), err)
@@ -130,7 +130,7 @@ func (s *Store) Load() (Theme, error) {
 		return Theme{}, fmt.Errorf("decode %s: %w", s.configPath(), err)
 	}
 	if cfg.theme == "" || cfg.theme == defaultName {
-		return Default(), nil
+		return s.load(defaultName)
 	}
 	return s.load(cfg.theme)
 }
@@ -190,18 +190,27 @@ func (s *Store) Select(name string) (Theme, error) {
 	return selected, nil
 }
 
-// load resolves a theme by name; the default needs no file.
+// load resolves a theme by name. Any theme may come from a file; the
+// default merges its file's color roles over the built-in palette, and a
+// missing default file yields the built-in palette unchanged.
 func (s *Store) load(name string) (Theme, error) {
-	if name == defaultName {
-		return Default(), nil
-	}
 	path, err := s.themesPath(name)
 	if err != nil {
 		return Theme{}, err
 	}
 	raw, err := os.ReadFile(path)
+	if errors.Is(err, fs.ErrNotExist) && name == defaultName {
+		return Default(), nil
+	}
 	if err != nil {
 		return Theme{}, fmt.Errorf("read %s: %w", path, err)
+	}
+	if name == defaultName {
+		selected, err := decodeDefaultOverride(raw)
+		if err != nil {
+			return Theme{}, fmt.Errorf("theme %s: %w", name, err)
+		}
+		return selected, nil
 	}
 	var parsed Theme
 	if err := decodeSingleDocument(raw, &parsed); err != nil {
@@ -212,6 +221,62 @@ func (s *Store) load(name string) (Theme, error) {
 		return Theme{}, fmt.Errorf("theme %s: %w", name, err)
 	}
 	return parsed, nil
+}
+
+// decodeDefaultOverride builds the default theme by replacing the built-in
+// palette roles named in the file and keeping every other built-in role.
+func decodeDefaultOverride(raw []byte) (Theme, error) {
+	var fields struct {
+		Colors map[string]json.RawMessage `json:"colors"`
+	}
+	if err := decodeSingleDocument(raw, &fields); err != nil {
+		return Theme{}, err
+	}
+	selected := Default()
+	palette := colorRoles(&selected.Palette)
+	for key, value := range fields.Colors {
+		role, ok := palette[key]
+		if !ok {
+			return Theme{}, fmt.Errorf("unknown color %q", key)
+		}
+		if err := json.Unmarshal(value, role.value()); err != nil {
+			return Theme{}, fmt.Errorf("color %q: %w", key, err)
+		}
+	}
+	if err := selected.Palette.validate(); err != nil {
+		return Theme{}, err
+	}
+	return selected, nil
+}
+
+// colorRoles maps JSON color keys to their writable palette targets.
+func colorRoles(p *Palette) map[string]colorRole {
+	return map[string]colorRole{
+		"accent":       {scalar: &p.Accent},
+		"muted":        {scalar: &p.Muted},
+		"cursor":       {scalar: &p.Cursor},
+		"error":        {scalar: &p.Error},
+		"selection":    {nil, &p.Selection},
+		"inactive_tab": {nil, &p.InactiveTab},
+		"status":       {nil, &p.Status},
+		"error_badge":  {nil, &p.ErrorBadge},
+		"queued":       {nil, &p.Queued},
+		"succeeded":    {nil, &p.Succeeded},
+		"canceled":     {nil, &p.Canceled},
+	}
+}
+
+type colorRole struct {
+	scalar *string
+	pair   *ColorPair
+}
+
+// value returns the unmarshal target for the role.
+func (r colorRole) value() any {
+	if r.pair != nil {
+		return r.pair
+	}
+	return r.scalar
 }
 
 // config mirrors the persisted configuration object. Unknown top-level keys

@@ -319,6 +319,79 @@ func TestCreateDefaultIfMissingOnlyWhenMissing(t *testing.T) {
 	})
 }
 
+func TestDefaultThemeFileOverridesBuiltinRoles(t *testing.T) {
+	t.Parallel()
+
+	t.Run("partial override merges over the built-in palette", func(t *testing.T) {
+		t.Parallel()
+
+		root := t.TempDir()
+		writeTheme(t, root, "default", `{"colors": {"accent": "200"}}`)
+		selected, err := NewStore(root).Load()
+		if err != nil {
+			t.Fatalf("load: %v", err)
+		}
+		want := Default()
+		want.Palette.Accent = "200"
+		if selected != want {
+			t.Fatalf("loaded %#v, want %#v", selected, want)
+		}
+		if selected.Name != "default" {
+			t.Fatalf("name %q, want default", selected.Name)
+		}
+	})
+
+	t.Run("full override replaces every role it names", func(t *testing.T) {
+		t.Parallel()
+
+		root := t.TempDir()
+		writeTheme(t, root, "default", `{"colors": {"accent": "200", "selection": {"foreground": "15", "background": "24"}}}`)
+		selected, err := NewStore(root).Load()
+		if err != nil {
+			t.Fatalf("load: %v", err)
+		}
+		if selected.Palette.Accent != "200" || selected.Palette.Selection != (ColorPair{Foreground: "15", Background: "24"}) {
+			t.Fatalf("unexpected palette: %#v", selected.Palette)
+		}
+		if selected.Palette.Muted != Default().Palette.Muted {
+			t.Fatalf("muted %q, want built-in %q", selected.Palette.Muted, Default().Palette.Muted)
+		}
+	})
+
+	t.Run("unknown color role is rejected", func(t *testing.T) {
+		t.Parallel()
+
+		root := t.TempDir()
+		writeTheme(t, root, "default", `{"colors": {"sparkle": "1"}}`)
+		if _, err := NewStore(root).Load(); err == nil {
+			t.Fatal("load accepted an unknown default color role")
+		}
+	})
+
+	t.Run("malformed default file is an error", func(t *testing.T) {
+		t.Parallel()
+
+		root := t.TempDir()
+		writeTheme(t, root, "default", `{bad`)
+		if _, err := NewStore(root).Load(); err == nil {
+			t.Fatal("load accepted a malformed default theme file")
+		}
+	})
+
+	t.Run("missing default file keeps the built-in palette", func(t *testing.T) {
+		t.Parallel()
+
+		root := t.TempDir()
+		selected, err := NewStore(root).Load()
+		if err != nil {
+			t.Fatalf("load: %v", err)
+		}
+		if selected != Default() {
+			t.Fatalf("loaded %#v, want %#v", selected, Default())
+		}
+	})
+}
+
 func TestSelectWritesAtomicFilePermissions(t *testing.T) {
 	t.Parallel()
 
