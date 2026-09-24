@@ -358,6 +358,62 @@ func TestCreateDefaultIfMissingOnlyWhenMissing(t *testing.T) {
 		}
 	})
 
+	t.Run("stale generated default theme is refreshed", func(t *testing.T) {
+		t.Parallel()
+
+		root := t.TempDir()
+		writeTheme(t, root, "default", `{
+  "colors": {
+    "accent": "34",
+    "canceled": {
+      "background": "241",
+      "foreground": "255"
+    },
+    "cursor": "46",
+    "error": "196",
+    "error_badge": {
+      "background": "196",
+      "foreground": "230"
+    },
+    "inactive_tab": {
+      "background": "236",
+      "foreground": "250"
+    },
+    "muted": "241",
+    "queued": {
+      "background": "34",
+      "foreground": "230"
+    },
+    "selection": {
+      "background": "22",
+      "foreground": "230"
+    },
+    "status": {
+      "background": "236",
+      "foreground": "250"
+    },
+    "succeeded": {
+      "background": "42",
+      "foreground": "0"
+    }
+  }
+}`)
+		if err := NewStore(root).CreateDefaultIfMissing(); err != nil {
+			t.Fatalf("create default: %v", err)
+		}
+		raw, err := os.ReadFile(filepath.Join(root, "themes", "default.json"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var generated Theme
+		if err := json.Unmarshal(raw, &generated); err != nil {
+			t.Fatal(err)
+		}
+		if generated.Palette != Default().Palette {
+			t.Fatalf("stale file was not refreshed: %#v", generated.Palette)
+		}
+	})
+
 	t.Run("malformed config is untouched", func(t *testing.T) {
 		t.Parallel()
 

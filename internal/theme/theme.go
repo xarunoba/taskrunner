@@ -54,17 +54,17 @@ func Default() Theme {
 	return Theme{
 		Name: defaultName,
 		Palette: Palette{
-			Accent:      "34",
-			Muted:       "241",
-			Cursor:      "46",
-			Error:       "196",
-			Selection:   ColorPair{Foreground: "230", Background: "22"},
-			InactiveTab: ColorPair{Foreground: "250", Background: "236"},
-			Status:      ColorPair{Foreground: "250", Background: "236"},
-			ErrorBadge:  ColorPair{Foreground: "230", Background: "196"},
-			Queued:      ColorPair{Foreground: "230", Background: "34"},
-			Succeeded:   ColorPair{Foreground: "0", Background: "42"},
-			Canceled:    ColorPair{Foreground: "255", Background: "241"},
+			Accent:      "42",
+			Muted:       "245",
+			Cursor:      "50",
+			Error:       "203",
+			Selection:   ColorPair{Foreground: "0", Background: "72"},
+			InactiveTab: ColorPair{Foreground: "245", Background: "238"},
+			Status:      ColorPair{Foreground: "252", Background: "235"},
+			ErrorBadge:  ColorPair{Foreground: "231", Background: "160"},
+			Queued:      ColorPair{Foreground: "0", Background: "74"},
+			Succeeded:   ColorPair{Foreground: "0", Background: "35"},
+			Canceled:    ColorPair{Foreground: "250", Background: "240"},
 		},
 	}
 }
@@ -101,9 +101,10 @@ func (s *Store) themesPath(name string) (string, error) {
 
 // CreateDefaultIfMissing persists the default configuration and a default
 // theme file when either is missing. Existing files, including malformed
-// ones, are left untouched. The generated themes/default.json lists every
-// built-in color role so users can edit individual roles from a working
-// file.
+// ones, are left untouched, except a default theme file holding the exact
+// legacy generated palette, which is refreshed to Default(). The generated
+// themes/default.json lists every built-in color role so users can edit
+// individual roles from a working file.
 func (s *Store) CreateDefaultIfMissing() error {
 	if err := s.createConfigIfMissing(); err != nil {
 		return err
@@ -130,10 +131,17 @@ func (s *Store) createDefaultThemeIfMissing() error {
 	if err != nil {
 		return err
 	}
-	if _, err := os.Stat(path); err == nil {
-		return nil
-	} else if !errors.Is(err, fs.ErrNotExist) {
-		return fmt.Errorf("stat %s: %w", path, err)
+	raw, err := os.ReadFile(path)
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+	case err != nil:
+		return fmt.Errorf("read %s: %w", path, err)
+	default:
+		// Rewrite only untouched generated files; anything else, including
+		// malformed content, belongs to the user.
+		if !isLegacyGeneratedDefault(raw) {
+			return nil
+		}
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return fmt.Errorf("create %s: %w", filepath.Dir(path), err)
@@ -142,6 +150,31 @@ func (s *Store) createDefaultThemeIfMissing() error {
 		return fmt.Errorf("write %s: %w", path, err)
 	}
 	return nil
+}
+
+// legacyPalette is the default palette generated before the dark-background
+// tuning. A default.json holding exactly this palette was written by
+// Taskrunner, not the user, so startup refreshes it to Default().
+var legacyPalette = Palette{
+	Accent:      "34",
+	Muted:       "241",
+	Cursor:      "46",
+	Error:       "196",
+	Selection:   ColorPair{Foreground: "230", Background: "22"},
+	InactiveTab: ColorPair{Foreground: "250", Background: "236"},
+	Status:      ColorPair{Foreground: "250", Background: "236"},
+	ErrorBadge:  ColorPair{Foreground: "230", Background: "196"},
+	Queued:      ColorPair{Foreground: "230", Background: "34"},
+	Succeeded:   ColorPair{Foreground: "0", Background: "42"},
+	Canceled:    ColorPair{Foreground: "255", Background: "241"},
+}
+
+func isLegacyGeneratedDefault(raw []byte) bool {
+	var parsed Theme
+	if err := decodeSingleDocument(raw, &parsed); err != nil {
+		return false
+	}
+	return parsed.Palette == legacyPalette
 }
 
 // Load returns the configured theme, or Default when no configuration exists.
