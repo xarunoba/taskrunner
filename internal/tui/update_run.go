@@ -2,10 +2,14 @@ package tui
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/filepicker"
+	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/xarunoba/taskrunner/internal/task"
 )
@@ -75,10 +79,15 @@ func (m *model) prepareRunField() tea.Cmd {
 		m.filePicker.ShowHidden = true
 		m.filePicker.FileAllowed = true
 		m.filePicker.DirAllowed = false
+		// AutoHeight would re-derive the height from WindowSizeMsg and reset
+		// the scroll window on resize; the model owns sizing instead.
+		m.filePicker.AutoHeight = false
 		m.filePicker.Styles.Cursor = m.styles.cursor
 		m.filePicker.Styles.Selected = m.styles.selected
-		m.filePicker.SetHeight(m.filePickerHeight())
-		return m.filePicker.Init()
+		m.filePicker.SetHeight(m.runFormListHeight())
+		m.fileCount = 0
+		m.fileNames = nil
+		return tea.Batch(m.filePicker.Init(), countDirEntries(m.filePicker.CurrentDirectory, m.filePicker.ShowHidden))
 	}
 	return nil
 }
@@ -165,7 +174,88 @@ func (m model) updateRunChoice(msg tea.Msg, field task.Field) (tea.Model, tea.Cm
 	return m, nil
 }
 
+// resizeFilePicker preserves selection through Bubbles' public navigation API;
+// SetHeight alone leaves a selected row outside the window after shrinking.
+func (m *model) resizeFilePicker() {
+	height := m.runFormListHeight()
+	if height == m.filePicker.Height {
+		return
+	}
+	selected := 0
+	if m.fileCount > 0 {
+		view := m.filePicker.View()
+		selected = m.runFileStart(view) + m.runFileCursorRow(view)
+	}
+	m.filePicker.SetHeight(height)
+	if m.fileCount == 0 {
+		return
+	}
+	m.positionFilePicker(selected)
+}
+
+func (m *model) positionFilePicker(selected int) {
+	start, direction, steps := 'g', tea.KeyDown, selected
+	if selected > m.fileCount/2 {
+		start, direction, steps = 'G', tea.KeyUp, m.fileCount-1-selected
+	}
+	m.filePicker, _ = m.filePicker.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{start}})
+	for range steps {
+		m.filePicker, _ = m.filePicker.Update(tea.KeyMsg{Type: direction})
+	}
+}
+
+// filePickerCountMsg mirrors the picker's directory listing: the entry count
+// for overflow detection and the sort-order names (dirs first, then lexical,
+// matching the Bubbles picker's readDir) for absolute scroll position. The
+// Bubbles file picker keeps its window indices unexported, so this public-API
+// compatible mirror is the only way to compute the true thumb position.
+type filePickerCountMsg struct {
+	dir   string
+	count int
+	names []string
+}
+
+func countDirEntries(dir string, showHidden bool) tea.Cmd {
+	return func() tea.Msg {
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			return filePickerCountMsg{dir: dir}
+		}
+		sort.Slice(entries, func(i, j int) bool {
+			if entries[i].IsDir() == entries[j].IsDir() {
+				return entries[i].Name() < entries[j].Name()
+			}
+			return entries[i].IsDir()
+		})
+		if !showHidden {
+			var visible []os.DirEntry
+			for _, entry := range entries {
+				if hidden, _ := filepicker.IsHidden(entry.Name()); !hidden {
+					visible = append(visible, entry)
+				}
+			}
+			entries = visible
+		}
+		names := make([]string, len(entries))
+		for i, entry := range entries {
+			names[i] = entry.Name()
+			if entry.Type()&os.ModeSymlink != 0 {
+				target, _ := filepath.EvalSymlinks(filepath.Join(dir, entry.Name()))
+				names[i] += " → " + target
+			}
+		}
+		return filePickerCountMsg{dir: dir, count: len(names), names: names}
+	}
+}
+
 func (m model) updateRunFile(msg tea.Msg, field task.Field) (tea.Model, tea.Cmd) {
+	if count, ok := msg.(filePickerCountMsg); ok {
+		if count.dir == m.filePicker.CurrentDirectory {
+			m.fileCount = count.count
+			m.fileNames = count.names
+		}
+		return m, nil
+	}
 	if field.Optional {
 		if key, ok := msg.(tea.KeyMsg); ok {
 			switch key.String() {
@@ -182,8 +272,26 @@ func (m model) updateRunFile(msg tea.Msg, field task.Field) (tea.Model, tea.Cmd)
 			}
 		}
 	}
+	previousDir := m.filePicker.CurrentDirectory
 	var cmd tea.Cmd
 	m.filePicker, cmd = m.filePicker.Update(msg)
+	if msg, ok := msg.(tea.KeyMsg); ok && key.Matches(msg, m.filePicker.KeyMap.PageDown) {
+		view := m.filePicker.View()
+		row := m.runFileCursorRow(view)
+		// Bubbles may include one extra row after paging at the end.
+		if m.fileCount > 0 && row >= m.filePicker.Height {
+			m.positionFilePicker(m.runFileStart(view) + row)
+		}
+	}
+	var cmds []tea.Cmd
+	if cmd != nil {
+		cmds = append(cmds, cmd)
+	}
+	if m.filePicker.CurrentDirectory != previousDir {
+		m.fileCount = 0
+		m.fileNames = nil
+		cmds = append(cmds, countDirEntries(m.filePicker.CurrentDirectory, m.filePicker.ShowHidden))
+	}
 	if selected, path := m.filePicker.DidSelectFile(msg); selected {
 		m.runValues[field.Key] = path
 		return m.advanceRun()
@@ -191,7 +299,7 @@ func (m model) updateRunFile(msg tea.Msg, field task.Field) (tea.Model, tea.Cmd)
 	if disabled, path := m.filePicker.DidSelectDisabledFile(msg); disabled {
 		m.setError(fmt.Errorf("cannot select %s", path))
 	}
-	return m, cmd
+	return m, tea.Batch(cmds...)
 }
 
 func (m model) updateRunConfirm(msg tea.Msg, field task.Field) (tea.Model, tea.Cmd) {

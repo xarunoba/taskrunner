@@ -48,10 +48,10 @@ func (m model) jobsView() string {
 	if len(m.jobs) == 0 {
 		body.WriteString(m.styles.muted.Render("No jobs yet."))
 	} else {
-		start, end := visibleRange(len(m.jobs), m.jobCursor, max(1, m.contentHeight()-4))
+		start, end := m.listRange(len(m.jobs), m.jobCursor, 1)
 		for i := start; i < end; i++ {
 			job := m.jobs[len(m.jobs)-1-i]
-			line := fmt.Sprintf("%-9s %s  %s", strings.ToUpper(string(job.Status)), job.Name, job.ShortID())
+			line := fmt.Sprintf("%-9s %s  %s", strings.ToUpper(string(job.Status)), strings.ReplaceAll(job.Name, "\n", " "), job.ShortID())
 			if i == m.jobCursor {
 				line = m.styles.selected.Render("› " + line)
 			} else {
@@ -59,17 +59,18 @@ func (m model) jobsView() string {
 			}
 			body.WriteString(line)
 			body.WriteByte('\n')
-			if i == m.jobCursor {
+			if i == m.jobCursor && m.contentHeight() > 1 {
 				body.WriteString("  ")
 				body.WriteString(m.styles.muted.Render(fmt.Sprintf(
 					"%s • %d bytes output • %s",
 					job.CreatedAt.Local().Format("2006-01-02 15:04:05"),
 					job.OutputSize,
-					job.Command,
+					strings.ReplaceAll(job.Command, "\n", " "),
 				)))
 				body.WriteByte('\n')
 			}
 		}
+		return m.renderWorkspacePanel(m.listWithScrollBar(body.String(), start, end, len(m.jobs)), screenJobs)
 	}
 	return m.renderWorkspacePanel(body.String(), screenJobs)
 }

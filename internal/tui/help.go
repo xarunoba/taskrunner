@@ -19,12 +19,19 @@ type helpGroup struct {
 }
 
 func (m model) helpGroups() []helpGroup {
+	switchKey, settingsKey, quitKey := "f6", "s / f4", "q / ctrl+c"
+	if !m.canGoBack() {
+		switchKey = "tab / f6"
+	}
+	if m.acceptsTextInput() {
+		settingsKey, quitKey = "f4", "ctrl+c"
+	}
 	general := helpGroup{
 		title: "General",
 		bindings: []helpBinding{
-			{key: "tab / f6", description: "switch Tasks or Jobs"},
-			{key: "s", description: "settings"},
-			{key: "q / ctrl+c", description: "quit"},
+			{key: switchKey, description: "switch Tasks or Jobs"},
+			{key: settingsKey, description: "settings"},
+			{key: quitKey, description: "quit"},
 			{key: "? / f1 / esc", description: "close keybinds"},
 		},
 	}
@@ -34,7 +41,7 @@ func (m model) helpGroups() []helpGroup {
 			{
 				bindings: []helpBinding{
 					{key: "tab / shift+tab", description: "move between sections"},
-					{key: "↑ / ↓", description: "move or select"},
+					{key: "↑ / ↓", description: "move; leave command at first/last row"},
 					{key: "enter", description: "insert command line or edit field"},
 					{key: "← / →", description: "change job policy"},
 					{key: "a / e / d", description: "add, edit, or delete field"},

@@ -114,7 +114,7 @@ func (m model) updateTaskFormKey(key string) (model, tea.Cmd, bool) {
 func (m model) updateTaskNavigationKey(key string) (model, tea.Cmd, bool) {
 	switch key {
 	case "up":
-		if m.taskFocus == 2 {
+		if m.taskFocus == 2 && (m.taskCommandInput.Line() > 0 || m.taskCommandInput.LineInfo().RowOffset > 0) {
 			return m, nil, false
 		}
 		if m.taskFocus == 1 && m.fieldCursor > 0 {
@@ -127,7 +127,10 @@ func (m model) updateTaskNavigationKey(key string) (model, tea.Cmd, bool) {
 		}
 	case "down":
 		if m.taskFocus == 2 {
-			return m, nil, false
+			line := m.taskCommandInput.LineInfo()
+			if m.taskCommandInput.Line() < m.taskCommandInput.LineCount()-1 || line.RowOffset < line.Height-1 {
+				return m, nil, false
+			}
 		}
 		if m.taskFocus == 1 {
 			if m.fieldCursor < len(m.formFields)-1 {

@@ -20,35 +20,98 @@ func (m model) scrollBar(height int, scrollable bool, percent float64) string {
 	return strings.Join(lines, "\n")
 }
 
-const (
-	settingsChipText = "s settings"
-	backChipText     = "← back"
-	helpChipText     = "? keybinds"
-)
+// withScrollBar reserves the final column even when all content fits.
+func (m model) withScrollBar(content string, width, height int, scrollable bool, percent float64) string {
+	contentWidth := max(0, width-1)
+	lines := strings.SplitN(content, "\n", max(1, height)+1)
+	lines = lines[:min(len(lines), max(1, height))]
+	for i, line := range lines {
+		lines[i] = ansi.Truncate(line, contentWidth, "…")
+	}
+	body := lipgloss.NewStyle().Width(contentWidth).Height(max(1, height)).
+		Render(strings.Join(lines, "\n"))
+	return lipgloss.JoinHorizontal(lipgloss.Top, body,
+		m.scrollBar(height, scrollable, percent))
+}
+
+func (m model) listRange(total, current, detailRows int) (int, int) {
+	return visibleRange(total, current, max(1, m.contentHeight()-detailRows))
+}
+
+func (m model) listWithScrollBar(content string, start, end, total int) string {
+	hidden := total - (end - start)
+	percent := 0.0
+	if hidden > 0 {
+		percent = float64(start) / float64(hidden)
+	}
+	return m.withScrollBar(content, m.contentWidth(), m.contentHeight(), hidden > 0, percent)
+}
+
+type footerButton struct {
+	key, descriptor string
+	row, x, width   int
+}
+
+type footerLayout struct {
+	buttons [3]footerButton
+	count   int
+	rows    int
+	width   int
+}
 
 func (m model) canGoBack() bool {
 	return m.screen != topLevelTab(m.screen)
 }
 
-func (m model) settingsChipWidth() int {
-	return ansi.StringWidth(m.styles.helpChip.Render(settingsChipText))
-}
-
-func (m model) backChipWidth() int {
-	return ansi.StringWidth(m.styles.helpChip.Render(backChipText))
-}
-
-func (m model) helpChipWidth() int {
-	return ansi.StringWidth(m.styles.helpChip.Render(helpChipText))
-}
-
-func (m model) footerControls() string {
-	settings := m.styles.helpChip.Render(settingsChipText)
-	help := m.styles.helpChip.Render(helpChipText)
-	if !m.canGoBack() {
-		return settings + " " + help
+// footerLayout is shared by rendering, content sizing, and mouse hit-testing.
+func (m model) footerLayout() footerLayout {
+	width := m.width
+	if width <= 0 {
+		width = 80
 	}
-	return m.styles.helpChip.Render(backChipText) + " " + settings + " " + help
+	layout := footerLayout{width: max(1, width-2), rows: 1}
+	if m.helpOpen || m.settingsOpen {
+		layout.buttons[0] = footerButton{key: "esc", descriptor: "close"}
+		layout.count = 1
+	} else {
+		if m.canGoBack() {
+			layout.buttons[0] = footerButton{key: "esc", descriptor: "back"}
+			if m.standaloneForm && m.screen == screenTask {
+				layout.buttons[0].descriptor = "cancel"
+			}
+			layout.count++
+		}
+		settingsKey, helpKey := "s", "?"
+		if m.acceptsTextInput() {
+			settingsKey, helpKey = "f4", "f1"
+		}
+		layout.buttons[layout.count] = footerButton{key: settingsKey, descriptor: "settings"}
+		layout.buttons[layout.count+1] = footerButton{key: helpKey, descriptor: "keybinds"}
+		layout.count += 2
+	}
+	var rowWidths [3]int
+	for i := range layout.count {
+		button := &layout.buttons[i]
+		button.width = min(layout.width, ansi.StringWidth(button.key)+1+ansi.StringWidth(button.descriptor)+m.styles.helpChip.GetHorizontalFrameSize())
+		row := layout.rows - 1
+		space := 0
+		if rowWidths[row] > 0 {
+			space = 1
+		}
+		if rowWidths[row]+space+button.width > layout.width {
+			layout.rows++
+			row++
+			space = 0
+		}
+		button.row = row
+		button.x = rowWidths[row] + space
+		rowWidths[row] += space + button.width
+	}
+	for i := range layout.count {
+		button := &layout.buttons[i]
+		button.x += 1 + layout.width - rowWidths[button.row]
+	}
+	return layout
 }
 
 func (m model) View() string {
@@ -213,28 +276,46 @@ func visibleRange(total, current, limit int) (int, int) {
 }
 
 func (m model) statusBar() string {
-	width := m.width
-	if width <= 0 {
-		width = 80
-	}
-	inner := max(1, width-2)
-	controls := m.footerControls()
-	controlsWidth := ansi.StringWidth(controls)
-	messageWidth := max(0, inner-controlsWidth-1)
-	message := ansi.Truncate(m.status, messageWidth, "…")
-	line := ""
-	if messageWidth > 0 {
-		line = " " + message
-	}
-	line += strings.Repeat(" ", max(0, inner-controlsWidth-ansi.StringWidth(line)))
-	line += controls
-	line = ansi.Truncate(line, inner, "")
-	line += strings.Repeat(" ", max(0, inner-ansi.StringWidth(line)))
+	layout := m.footerLayout()
 	style := m.styles.statusBar
 	if m.statusError {
 		style = m.styles.statusBarError
 	}
-	return m.styles.border.Render("╰") + style.Render(line) + m.styles.border.Render("╯")
+	var body strings.Builder
+	for row := range layout.rows {
+		var line strings.Builder
+		column := 1
+		for i := range layout.count {
+			button := layout.buttons[i]
+			if button.row != row {
+				continue
+			}
+			if row == 0 && line.Len() == 0 {
+				message := ansi.Truncate(m.status, max(0, button.x-3), "…")
+				if message != "" {
+					line.WriteByte(' ')
+					line.WriteString(message)
+					column += 1 + ansi.StringWidth(message)
+				}
+			}
+			line.WriteString(strings.Repeat(" ", max(0, button.x-column)))
+			label := m.styles.helpChip.Render(button.key + " " + button.descriptor)
+			line.WriteString(ansi.Truncate(label, button.width, "…"))
+			column = button.x + button.width
+		}
+		line.WriteString(strings.Repeat(" ", max(0, layout.width+1-column)))
+		left, right := "│", "│"
+		if row == layout.rows-1 {
+			left, right = "╰", "╯"
+		}
+		if row > 0 {
+			body.WriteByte('\n')
+		}
+		body.WriteString(m.styles.border.Render(left))
+		body.WriteString(style.Render(line.String()))
+		body.WriteString(m.styles.border.Render(right))
+	}
+	return body.String()
 }
 
 func (m model) renderPanelWithFooter(content string) string {

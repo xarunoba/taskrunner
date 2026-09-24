@@ -1,8 +1,6 @@
 package tui
 
 import (
-	"fmt"
-	"slices"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -44,111 +42,64 @@ func (m model) updateMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	if event.Action != tea.MouseActionPress || event.Button != tea.MouseButtonLeft {
 		return m, nil
 	}
-	lines := strings.Split(ansi.Strip(m.View()), "\n")
-	if mouseLineIsLastMatch(lines, event.Y, settingsChipText) {
-		if start, end := m.settingsChipColumns(); event.X >= start && event.X < end {
-			if m.settingsOpen {
+	layout := m.footerLayout()
+	height := m.height
+	if height <= 0 {
+		height = 40
+	}
+	for i := range layout.count {
+		button := layout.buttons[i]
+		if event.Y != height-layout.rows+button.row || event.X < button.x || event.X >= button.x+button.width {
+			continue
+		}
+		switch button.key {
+		case "esc":
+			if m.helpOpen || m.settingsOpen {
+				m.helpOpen = false
 				m.settingsOpen = false
 				return m, nil
 			}
+			return m.goBack()
+		case "s", "f4":
 			return m.openSettings()
-		}
-	}
-	if m.settingsOpen {
-		return m.clickSettings(lines, event.Y, event.X)
-	}
-	if mouseLineIsLastMatch(lines, event.Y, helpChipText) {
-		if start, end := m.helpChipColumns(); event.X >= start && event.X < end {
-			if m.helpOpen {
-				m.helpOpen = false
-			} else {
-				m.openHelp()
-			}
+		case "?", "f1":
+			m.openHelp()
 			return m, nil
 		}
 	}
+	lines := strings.Split(ansi.Strip(m.View()), "\n")
+	if m.settingsOpen {
+		return m.clickSettings(lines, event.Y, event.X)
+	}
 	if m.helpOpen {
 		return m, nil
-	}
-	if mouseLineIsLastMatch(lines, event.Y, backChipText) {
-		if start, end, ok := m.backChipColumns(); ok && event.X >= start && event.X < end {
-			return m.goBack()
-		}
 	}
 	if screen, ok := topLevelTabAt(lines, event.Y, event.X); ok {
 		m.switchTab(screen)
 		return m, nil
 	}
 
-	line := mouseLine(lines, event.Y)
+	left := m.styles.panel.GetBorderLeftSize() + m.styles.panel.GetPaddingLeft()
+	top := m.styles.panel.GetBorderTopSize() + m.styles.panel.GetPaddingTop()
+	row := event.Y - top
+	if row < 0 || row >= m.contentHeight() || event.X < left || event.X >= left+m.contentWidth()-1 {
+		return m, nil
+	}
+	line := strings.TrimSpace(ansi.Cut(lines[event.Y], left, left+m.contentWidth()-1))
 	switch m.screen {
 	case screenTask:
 		return m.clickTaskForm(line, event.X)
 	case screenField:
-		return m.clickFieldForm(line, event.X)
+		return m.clickFieldForm(row, event.X)
 	case screenRun:
-		return m.clickRunForm(line, event.X)
+		return m.clickRunForm(line, event.X, row)
 	case screenJobs:
-		return m.clickJobs(line)
+		return m.clickJobs(row)
 	case screenResult:
 		return m, nil
 	default:
-		return m.clickTaskList(line)
+		return m.clickTaskList(row)
 	}
-}
-
-func mouseLine(lines []string, y int) string {
-	if y < 0 || y >= len(lines) {
-		return ""
-	}
-	line := strings.TrimSpace(lines[y])
-	line = strings.TrimPrefix(line, "│")
-	line = strings.TrimSuffix(line, "│")
-	line = strings.TrimPrefix(line, "╰─ ")
-	if border := strings.LastIndex(line, " ─"); border >= 0 {
-		line = line[:border]
-	}
-	return strings.TrimSpace(line)
-}
-
-func mouseLineIsLastMatch(lines []string, y int, text string) bool {
-	for i, line := range slices.Backward(lines) {
-		if strings.Contains(line, text) {
-			return y == i
-		}
-	}
-	return false
-}
-
-func (m model) settingsChipColumns() (int, int) {
-	width := m.width
-	if width <= 0 {
-		width = 80
-	}
-	helpStart, _ := m.helpChipColumns()
-	end := helpStart - 1
-	start := max(1, end-m.settingsChipWidth())
-	return start, end
-}
-
-func (m model) helpChipColumns() (int, int) {
-	width := m.width
-	if width <= 0 {
-		width = 80
-	}
-	end := width - 1
-	start := max(1, end-m.helpChipWidth())
-	return start, end
-}
-
-func (m model) backChipColumns() (int, int, bool) {
-	if !m.canGoBack() {
-		return 0, 0, false
-	}
-	settingsStart, _ := m.settingsChipColumns()
-	end := settingsStart - 1
-	start := max(1, end-m.backChipWidth())
-	return start, end, true
 }
 
 func (m model) goBack() (tea.Model, tea.Cmd) {
@@ -167,33 +118,45 @@ func (m model) goBack() (tea.Model, tea.Cmd) {
 	}
 }
 
-func (m model) clickTaskList(line string) (tea.Model, tea.Cmd) {
-	for i, item := range m.tasks {
-		row := item.Name + m.taskActivity(item.File)
-		if line != row && line != "› "+row {
-			continue
+// listItemAtRow uses the same item window and expanded detail rows as rendering.
+func (m model) listItemAtRow(total, current, detailRows, row int) int {
+	start, end := m.listRange(total, current, detailRows)
+	for i := start; i < end; i++ {
+		if row == 0 {
+			return i
 		}
-		if m.cursor == i {
-			return m.startRun(item)
+		row--
+		if i == current {
+			row -= min(detailRows, m.contentHeight()-1)
 		}
-		m.cursor = i
+		if row < 0 {
+			break
+		}
+	}
+	return -1
+}
+
+func (m model) clickTaskList(row int) (tea.Model, tea.Cmd) {
+	i := m.listItemAtRow(len(m.tasks), m.cursor, 2, row)
+	if i < 0 {
 		return m, nil
 	}
+	if m.cursor == i {
+		return m.startRun(m.tasks[i])
+	}
+	m.cursor = i
 	return m, nil
 }
 
-func (m model) clickJobs(line string) (tea.Model, tea.Cmd) {
-	for i := range m.jobs {
-		job := m.jobs[len(m.jobs)-1-i]
-		row := fmt.Sprintf("%-9s %s  %s", strings.ToUpper(string(job.Status)), job.Name, job.ShortID())
-		if line == row || line == "› "+row {
-			if m.jobCursor == i {
-				return m, m.openJob(job.ID)
-			}
-			m.jobCursor = i
-			return m, nil
-		}
+func (m model) clickJobs(row int) (tea.Model, tea.Cmd) {
+	i := m.listItemAtRow(len(m.jobs), m.jobCursor, 1, row)
+	if i < 0 {
+		return m, nil
 	}
+	if m.jobCursor == i {
+		return m, m.openJob(m.jobs[len(m.jobs)-1-i].ID)
+	}
+	m.jobCursor = i
 	return m, nil
 }
 
@@ -277,52 +240,59 @@ func (m model) clickTaskForm(line string, x int) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m model) clickFieldForm(line string, x int) (tea.Model, tea.Cmd) {
-	switch {
-	case line == "Key" || containsNonEmpty(line, m.fieldInputs[0].Value()):
-		m.fieldFocus = 0
-		m.fieldInputs[0].SetCursor(max(0, x-3))
-	case line == "Label" || containsNonEmpty(line, m.fieldInputs[1].Value()):
-		m.fieldFocus = 1
-		m.fieldInputs[1].SetCursor(max(0, x-3))
-	case line == "Type":
-		m.fieldFocus = 2
-	case strings.Contains(line, "Options (comma-separated)") || containsNonEmpty(line, m.fieldInputs[2].Value()):
-		m.fieldFocus = 3
-		m.fieldInputs[2].SetCursor(max(0, x-3))
-	case strings.Contains(line, "From (earlier field)"):
-		m.fieldFocus = 3
-	case line == "Interpolation":
-		m.fieldFocus = 4
-	case line == "Prefix" || containsNonEmpty(line, m.fieldInputs[3].Value()):
-		m.fieldFocus = 5
-		m.fieldInputs[3].SetCursor(max(0, x-3))
-	case line == "Suffix" || containsNonEmpty(line, m.fieldInputs[4].Value()):
-		m.fieldFocus = 6
-		m.fieldInputs[4].SetCursor(max(0, x-3))
-	case line == "Requirement":
-		m.fieldFocus = 7
-	default:
-		if selected := optionAtX(line, x-3, fieldTypeLabels); selected >= 0 {
-			m.fieldFocus = 2
+func (m model) clickFieldForm(row, x int) (tea.Model, tea.Cmd) {
+	lines, start, end, _, controls := m.fieldFormLayout()
+	contentRow := start + row
+	if contentRow >= end {
+		return m, nil
+	}
+	focus := -1
+	for i, control := range controls {
+		if contentRow >= control.start && contentRow < control.end {
+			focus = i
+			break
+		}
+	}
+	if focus < 0 {
+		return m, nil
+	}
+	m.fieldFocus = focus
+	column := x - m.styles.panel.GetBorderLeftSize() - m.styles.panel.GetPaddingLeft()
+	line := ansi.Strip(lines[contentRow])
+	switch focus {
+	case 0:
+		m.fieldInputs[0].SetCursor(max(0, column))
+	case 1:
+		m.fieldInputs[1].SetCursor(max(0, column))
+	case 2:
+		if selected := optionAtX(line, column, fieldTypeLabels); selected >= 0 {
 			m.fieldTypeCursor = selected
-		} else if selected := optionAtX(line, x-3, []string{"Argument", "Raw"}); selected >= 0 {
-			m.fieldFocus = 4
-			m.fieldRaw = selected == 1
-		} else if selected := optionAtX(line, x-3, []string{"Required", "Optional"}); selected >= 0 {
-			m.fieldFocus = 7
-			m.fieldOptional = selected == 1
-		} else if fieldTypes[m.fieldTypeCursor] == task.FieldRefer {
-			if selected := optionAtX(line, x-3, m.referSourceKeys()); selected >= 0 {
-				m.fieldFocus = 3
+		}
+	case 3:
+		if fieldTypes[m.fieldTypeCursor] == task.FieldRefer {
+			if selected := optionAtX(line, column, m.referSourceKeys()); selected >= 0 {
 				m.fieldFromCursor = selected
 			}
+		} else {
+			m.fieldInputs[2].SetCursor(max(0, column))
+		}
+	case 4:
+		if selected := optionAtX(line, column, []string{"Argument", "Raw"}); selected >= 0 {
+			m.fieldRaw = selected == 1
+		}
+	case 5:
+		m.fieldInputs[3].SetCursor(max(0, column))
+	case 6:
+		m.fieldInputs[4].SetCursor(max(0, column))
+	case 7:
+		if selected := optionAtX(line, column, []string{"Required", "Optional"}); selected >= 0 {
+			m.fieldOptional = selected == 1
 		}
 	}
 	return m, m.focusFieldControl()
 }
 
-func (m model) clickRunForm(line string, x int) (tea.Model, tea.Cmd) {
+func (m model) clickRunForm(line string, x, row int) (tea.Model, tea.Cmd) {
 	field := m.runTask.Fields[m.runIndex]
 
 	switch field.Type {
@@ -330,22 +300,34 @@ func (m model) clickRunForm(line string, x int) (tea.Model, tea.Cmd) {
 		m.runInput.SetCursor(max(0, x-3))
 		return m, m.runInput.Focus()
 	case task.FieldChoice:
-		if field.Optional && (strings.HasPrefix(line, "› Skip") || line == "Skip") {
-			m.choiceCursor = -1
-			break
-		}
-		for i, option := range field.Options {
-			resolved := task.ResolveKnownValues(option, m.runValues)
-			if line == resolved || line == "› "+resolved {
-				m.choiceCursor = i
-				break
-			}
+		if index, ok := m.runChoiceRowAt(row); ok {
+			m.choiceCursor = index
 		}
 	case task.FieldFile:
-		if field.Optional && strings.Contains(line, "skip") {
+		if m.runFileSkipHit(row) {
 			m.runValues[field.Key] = ""
 			return m.advanceRun()
 		}
+		pickerRow := row - strings.Count(m.runFormHeader(field), "\n")
+		if pickerRow < 0 || pickerRow >= min(m.fileCount, m.filePicker.Height) {
+			return m, nil
+		}
+		m.choiceCursor = 0
+		move := m.runFileClickMove(row)
+		key := tea.KeyDown
+		if move < 0 {
+			key = tea.KeyUp
+			move = -move
+		}
+		var cmds []tea.Cmd
+		for range move {
+			var cmd tea.Cmd
+			m.filePicker, cmd = m.filePicker.Update(tea.KeyMsg{Type: key})
+			if cmd != nil {
+				cmds = append(cmds, cmd)
+			}
+		}
+		return m, tea.Batch(cmds...)
 	case task.FieldConfirm:
 		if selected := optionAtX(line, x-3, []string{"No", "Yes"}); selected >= 0 {
 			m.confirmationYes = selected == 1

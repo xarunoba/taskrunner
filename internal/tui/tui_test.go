@@ -332,54 +332,6 @@ func TestWorkspaceHeaderUsesTopBorder(t *testing.T) {
 		t.Fatalf("view still contains the taskrunner title:\n%s", view)
 	}
 }
-func TestFooterShowsContextualControls(t *testing.T) {
-	t.Parallel()
-
-	m := newModel(task.NewStore(t.TempDir()), nil, theme.NewStore(t.TempDir()), theme.Default())
-	m.resize(80, 24)
-	footer := ansi.Strip(strings.Split(m.View(), "\n")[m.height-1])
-	for _, text := range []string{settingsChipText, helpChipText} {
-		if !strings.Contains(footer, text) {
-			t.Fatalf("Tasks footer does not contain %q:\n%s", text, footer)
-		}
-	}
-	if strings.Contains(footer, backChipText) {
-		t.Fatalf("Tasks home footer contains %q:\n%s", backChipText, footer)
-	}
-	if strings.Contains(footer, backChipText) &&
-		strings.Index(footer, backChipText) > strings.Index(footer, settingsChipText) {
-		t.Fatalf("back chip is not left of the settings chip:\n%s", footer)
-	}
-	for _, text := range []string{"enter run", "n new", "e edit", "d delete", "tab switch", "q quit"} {
-		if strings.Contains(footer, text) {
-			t.Fatalf("Tasks footer still contains control %q:\n%s", text, footer)
-		}
-	}
-
-	m.openTaskForm(task.Task{})
-	footer = ansi.Strip(strings.Split(m.View(), "\n")[m.height-1])
-	for _, text := range []string{backChipText, helpChipText} {
-		if !strings.Contains(footer, text) {
-			t.Fatalf("task form footer does not contain %q:\n%s", text, footer)
-		}
-	}
-	styledFooter := strings.Split(m.View(), "\n")[m.height-1]
-	if !strings.Contains(styledFooter, m.styles.helpChip.Render(backChipText)) {
-		t.Fatalf("back chip does not use the footer control style:\n%s", styledFooter)
-	}
-
-	m.showScreen(screenJobs)
-	footer = ansi.Strip(strings.Split(m.View(), "\n")[m.height-1])
-	if strings.Contains(footer, backChipText) {
-		t.Fatalf("Jobs home footer contains %q:\n%s", backChipText, footer)
-	}
-	m.openResult(daemon.Job{})
-	footer = ansi.Strip(strings.Split(m.View(), "\n")[m.height-1])
-	if !strings.Contains(footer, backChipText) {
-		t.Fatalf("job result footer does not contain %q:\n%s", backChipText, footer)
-	}
-}
-
 func TestFooterControlsSupportMouseInput(t *testing.T) {
 	t.Parallel()
 
@@ -393,20 +345,20 @@ func TestFooterControlsSupportMouseInput(t *testing.T) {
 		m := newModel(task.NewStore(t.TempDir()), nil, theme.NewStore(t.TempDir()), theme.Default())
 		m.resize(size.width, size.height)
 
-		updated, _ := m.Update(mouseClickOn(t, m.View(), helpChipText))
+		updated, _ := m.Update(mouseClickOn(t, m.View(), "? keybinds"))
 		m = updated.(model)
 		if !m.helpOpen {
 			t.Fatalf("%dx%d: clicking keybind footer control did not open help", size.width, size.height)
 		}
 
-		updated, _ = m.Update(mouseClickOn(t, m.View(), helpChipText))
+		updated, _ = m.Update(mouseClickOn(t, m.View(), "esc close"))
 		m = updated.(model)
 		if m.helpOpen {
-			t.Fatalf("%dx%d: clicking keybind footer control again did not close help", size.width, size.height)
+			t.Fatalf("%dx%d: clicking close did not close help", size.width, size.height)
 		}
 
 		m.openTaskForm(task.Task{})
-		updated, _ = m.Update(mouseClickOn(t, m.View(), backChipText))
+		updated, _ = m.Update(mouseClickOn(t, m.View(), "esc back"))
 		m = updated.(model)
 		if m.screen != screenList {
 			t.Fatalf("%dx%d: clicking back produced screen %d, want Tasks home", size.width, size.height, m.screen)
@@ -758,6 +710,81 @@ func TestTaskFormArrowAndMouseNavigation(t *testing.T) {
 	}
 }
 
+func TestCommandEditorArrowBoundaries(t *testing.T) {
+	t.Parallel()
+	for _, command := range []string{"", "printf ok", "one\ntwo\nthree", "one\n", strings.Repeat("界abc ", 24)} {
+		t.Run(fmt.Sprintf("%q", command), func(t *testing.T) {
+			m := newModel(task.NewStore(t.TempDir()), nil, theme.NewStore(t.TempDir()), theme.Default())
+			m.openTaskForm(task.Task{Name: "Draft", Command: command})
+			press := func(key tea.KeyType) {
+				updated, _ := m.Update(tea.KeyMsg{Type: key})
+				m = updated.(model)
+			}
+			for _, width := range []int{24, 80} {
+				m.resize(width, 10)
+				m.taskFocus = 2
+				m.focusTaskControl()
+				press(tea.KeyCtrlHome)
+				press(tea.KeyUp)
+				if m.taskFocus != 1 {
+					t.Fatalf("width %d: Up on first row did not focus Fields", width)
+				}
+				press(tea.KeyTab)
+				press(tea.KeyCtrlEnd)
+				press(tea.KeyDown)
+				if m.taskFocus != 3 {
+					t.Fatalf("width %d: Down on last row did not focus Job policy", width)
+				}
+				press(tea.KeyUp)
+				if m.taskFocus != 2 || !m.taskCommandInput.Focused() {
+					t.Fatal("Up from Job policy did not return to the command")
+				}
+				if m.taskCommandInput.Value() != command || m.taskNameInput.Value() != "Draft" {
+					t.Fatal("arrow navigation changed draft values")
+				}
+			}
+		})
+	}
+}
+
+func TestCommandEditorArrowsStayWithinVisualRows(t *testing.T) {
+	t.Parallel()
+	for _, command := range []string{"first\nmiddle\nlast", strings.Repeat("界abc ", 24)} {
+		m := newModel(task.NewStore(t.TempDir()), nil, theme.NewStore(t.TempDir()), theme.Default())
+		m.resize(24, 10)
+		m.openTaskForm(task.Task{Name: "Draft", Command: command})
+		m.taskFocus = 2
+		m.focusTaskControl()
+		press := func(key tea.KeyType) {
+			updated, _ := m.Update(tea.KeyMsg{Type: key})
+			m = updated.(model)
+		}
+		press(tea.KeyCtrlHome)
+		press(tea.KeyDown)
+		if m.taskFocus != 2 || m.taskCommandCursorLine() != 1 {
+			t.Fatal("Down left the textarea before its last visual row")
+		}
+		press(tea.KeyUp)
+		if m.taskFocus != 2 || m.taskCommandCursorLine() != 0 {
+			t.Fatal("Up left the textarea instead of returning to its first visual row")
+		}
+		press(tea.KeyCtrlEnd)
+		lastRow := m.taskCommandCursorLine()
+		press(tea.KeyUp)
+		if m.taskFocus != 2 || m.taskCommandCursorLine() != lastRow-1 {
+			t.Fatal("Up did not move within the last logical/wrapped line")
+		}
+		press(tea.KeyDown)
+		if m.taskFocus != 2 || m.taskCommandCursorLine() != lastRow {
+			t.Fatal("Down left the textarea instead of returning to its last visual row")
+		}
+		press(tea.KeyDown)
+		if m.taskFocus != 3 || m.taskCommandInput.Value() != command {
+			t.Fatal("Down at the boundary did not leave the command unchanged")
+		}
+	}
+}
+
 func TestTaskCommandEditorStartsMultiline(t *testing.T) {
 	t.Parallel()
 
@@ -1096,6 +1123,10 @@ func TestMouseSelectsFieldControlsAndRuntimeChoices(t *testing.T) {
 		t.Fatalf("raw click produced raw=%t focus=%d, want true and 4", m.fieldRaw, m.fieldFocus)
 	}
 
+	for range 3 {
+		updated, _ = m.updateFieldForm(tea.KeyMsg{Type: tea.KeyTab})
+		m = updated.(model)
+	}
 	updated, _ = m.updateMouse(mouseClickOn(t, m.View(), "Optional"))
 	m = updated.(model)
 	if !m.fieldOptional || m.fieldFocus != 7 {

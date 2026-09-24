@@ -57,6 +57,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "f1":
 			m.openHelp()
 			return m, nil
+		case "f4":
+			return m.openSettings()
 		case "?":
 			if !m.acceptsTextInput() {
 				m.openHelp()

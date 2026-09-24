@@ -207,6 +207,8 @@ type model struct {
 	choiceCursor    int
 	confirmationYes bool
 	filePicker      filepicker.Model
+	fileCount       int
+	fileNames       []string
 
 	result         daemon.Job
 	resultViewport viewport.Model
@@ -264,13 +266,13 @@ func (m *model) resize(width, height int) {
 	m.height = height
 
 	inputWidth := max(1, m.contentWidth())
-	m.taskNameInput.Width = max(1, inputWidth-1)
+	m.taskNameInput.Width = max(1, inputWidth-2)
 	m.resizeTaskForm()
 	for i := range m.fieldInputs {
-		m.fieldInputs[i].Width = inputWidth
+		m.fieldInputs[i].Width = max(1, inputWidth-2)
 	}
 	m.runInput.Width = inputWidth
-	m.filePicker.SetHeight(m.filePickerHeight())
+	m.resizeFilePicker()
 	m.resizeResultViewport()
 }
 
@@ -287,7 +289,7 @@ func (m model) contentHeight() int {
 	if height <= 0 {
 		height = 40
 	}
-	return max(1, height-m.styles.panel.GetVerticalFrameSize())
+	return max(1, height-m.styles.panel.GetVerticalFrameSize()-m.footerLayout().rows+1)
 }
 
 func (m *model) resizeTaskForm() {
@@ -310,10 +312,6 @@ func taskCommandLineHeight(command string, width int) int {
 func (m model) taskCommandView() string {
 	lines := strings.Split(m.taskCommandInput.View(), "\n")
 	return strings.Join(lines[:min(m.taskCommandInput.Height(), len(lines))], "\n")
-}
-
-func (m model) filePickerHeight() int {
-	return max(1, m.contentHeight()-8)
 }
 
 func (m *model) resizeResultViewport() {
@@ -344,7 +342,8 @@ func (m model) acceptsTextInput() bool {
 	case screenTask:
 		return m.taskFocus == 0 || m.taskFocus == 2
 	case screenField:
-		return m.fieldFocus == 0 || m.fieldFocus == 1 || m.fieldFocus == 3
+		_, input := m.fieldInputForFocus(m.fieldFocus)
+		return input
 	case screenRun:
 		return len(m.runTask.Fields) > 0 && m.runTask.Fields[m.runIndex].Type == task.FieldText
 	default:

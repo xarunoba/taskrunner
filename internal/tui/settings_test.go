@@ -300,7 +300,7 @@ func TestSettingsMouseOpensCyclesAndBlocksUnderlyingScreen(t *testing.T) {
 				}
 
 				// The footer chip opens settings.
-				updated, cmd := m.Update(mouseClickOn(t, m.View(), settingsChipText))
+				updated, cmd := m.Update(mouseClickOn(t, m.View(), "s settings"))
 				m = updated.(model)
 				if !m.settingsOpen || cmd == nil {
 					t.Fatalf("%dx%d: settings chip click did not open settings", size.width, size.height)
@@ -329,11 +329,11 @@ func TestSettingsMouseOpensCyclesAndBlocksUnderlyingScreen(t *testing.T) {
 					t.Fatalf("click reached the hidden screen: task=%d job=%d", m.cursor, m.jobCursor)
 				}
 
-				// The help chip stays blocked while settings is open.
-				updated, _ = m.Update(mouseClickOn(t, m.View(), helpChipText))
+				// Help remains blocked while settings is open.
+				updated, _ = m.Update(typeKey('?'))
 				m = updated.(model)
 				if m.helpOpen || !m.settingsOpen {
-					t.Fatalf("help chip click while settings open produced help=%t settings=%t", m.helpOpen, m.settingsOpen)
+					t.Fatalf("help key while settings open produced help=%t settings=%t", m.helpOpen, m.settingsOpen)
 				}
 
 				// Clicking the value side cycles to the next theme.
@@ -371,7 +371,7 @@ func TestSettingsMouseOpensCyclesAndBlocksUnderlyingScreen(t *testing.T) {
 				}
 
 				// The footer chip closes settings; the screen works again.
-				updated, _ = m.Update(mouseClickOn(t, m.View(), settingsChipText))
+				updated, _ = m.Update(mouseClickOn(t, m.View(), "esc close"))
 				m = updated.(model)
 				if m.settingsOpen {
 					t.Fatal("settings chip click did not close settings")

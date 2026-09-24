@@ -29,18 +29,22 @@ taskrunner
 
 ## TUI
 
-Run `taskrunner` without arguments to open the **Tasks** tab. Press `?` for keybinds on the current screen; while editing text, use `F1` for help and `Ctrl+C` to quit. The footer shows **s settings** everywhere, plus **Back** outside each tab's home screen. Click **Back** to return, **s settings** to change the theme, or **? keybinds** to toggle help.
+Run `taskrunner` without arguments to open the **Tasks** tab. Press `?` for keybinds on the current screen. While editing text, use `F1` for keybinds, `F4` for Settings, and `Ctrl+C` to quit.
+
+Footer buttons show `<keybind> <descriptor>`: **esc back**, **s settings**, and **? keybinds**. During text entry, the latter two show **f4 settings** and **f1 keybinds**. Modals show **esc close**; direct create/edit screens show **esc cancel**. Buttons wrap onto extra footer rows in narrow terminals. Clicking a button performs the same action as its displayed key.
+
+Overflowing lists, pickers, editors, help, and logs show a right-edge position bar. It disappears when the content fits. The bar is an indicator, not a draggable control; use the keyboard or mouse wheel to navigate. Editors keep the focused control visible as you move forward or backward.
 
 ### Settings
 
-Press `s` or click the **s settings** footer chip to open the Settings modal on any screen (outside text entry). `Esc` or `s` closes it without changing anything.
+Press `s` outside text entry, press `F4`, or click the Settings footer button to open the Settings modal. `Esc`, `s`, or the **esc close** button closes it.
 
 | Input | Action |
 | --- | --- |
-| `s` or footer chip | Open or close Settings |
+| `s` outside text entry / `F4` / Settings footer button | Open Settings |
 | `↑` / `↓` | Move between setting rows |
 | `←` / `→`, `h` / `l`, or `Enter` | Cycle the selected row to its previous or next value |
-| `Esc` | Close without changing |
+| `Esc` / `s` / **esc close** | Close Settings |
 | Mouse | Click a row's label for the previous value or its value for the next |
 
 The **Theme** choice applies immediately and saves to the configuration file; see [Configuration](#configuration).
@@ -72,6 +76,8 @@ The editor walks you through the command, an optional job policy, and any prompt
 | `[` / `]` | Move the selected field earlier or later |
 | `F2` or `Ctrl+S` | Save the task |
 | `Esc` | Cancel |
+
+In the command editor, `↑` on the first displayed line moves to Fields, and `↓` on the last displayed line moves to Job policy. Otherwise, the arrows move the cursor within the command. Wrapped lines count as displayed lines; leaving the editor preserves the command and cursor position.
 
 Fields run in their displayed order and can be required or optional. Field values are shell-quoted before substitution, so spaces and special characters stay part of one argument.
 

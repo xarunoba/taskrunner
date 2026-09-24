@@ -15,36 +15,32 @@ func (m model) listView() string {
 	if len(m.tasks) == 0 {
 		body.WriteString(m.styles.muted.Render("No tasks yet. Press n to create one."))
 	} else {
-		start, end := visibleRange(len(m.tasks), m.cursor, max(1, m.contentHeight()-7))
-		if start > 0 {
-			body.WriteString(m.styles.muted.Render(fmt.Sprintf("↑ %d more", start)))
-			body.WriteByte('\n')
-		}
+		start, end := m.listRange(len(m.tasks), m.cursor, 2)
 		for i := start; i < end; i++ {
 			item := m.tasks[i]
-			name := "  " + item.Name + m.taskActivity(item.File)
+			title := strings.ReplaceAll(item.Name, "\n", " ") + m.taskActivity(item.File)
+			name := "  " + title
 			if i == m.cursor {
-				name = m.styles.selected.Render("› " + item.Name + m.taskActivity(item.File))
+				name = m.styles.selected.Render("› " + title)
 			}
 			body.WriteString(name)
 			body.WriteByte('\n')
-			if i == m.cursor {
+			if i == m.cursor && m.contentHeight() > 1 {
 				body.WriteString("  ")
-				body.WriteString(m.styles.muted.Render(item.Command))
+				body.WriteString(m.styles.muted.Render(strings.ReplaceAll(item.Command, "\n", " ")))
 				body.WriteByte('\n')
-				body.WriteString("  ")
-				body.WriteString(m.styles.muted.Render(fmt.Sprintf(
-					"%d fields • %s",
-					len(item.Fields),
-					jobPolicySummary(item.JobPolicy),
-				)))
-				body.WriteByte('\n')
+				if m.contentHeight() > 2 {
+					body.WriteString("  ")
+					body.WriteString(m.styles.muted.Render(fmt.Sprintf(
+						"%d fields • %s",
+						len(item.Fields),
+						jobPolicySummary(item.JobPolicy),
+					)))
+					body.WriteByte('\n')
+				}
 			}
 		}
-		if end < len(m.tasks) {
-			body.WriteString(m.styles.muted.Render(fmt.Sprintf("↓ %d more", len(m.tasks)-end)))
-			body.WriteByte('\n')
-		}
+		return m.renderWorkspacePanel(m.listWithScrollBar(body.String(), start, end, len(m.tasks)), screenList)
 	}
 
 	return m.renderWorkspacePanel(body.String(), screenList)
@@ -148,12 +144,13 @@ func (m model) taskFormContent() (string, int) {
 	write(m.styles.muted.Render("Use {{field_key}} where a runtime value belongs."))
 	write(m.gap())
 
+	policy, selectedLine := m.pickerLayout(jobPolicyLabels, jobPolicyIndex(m.formJobPolicy))
 	if m.taskFocus == 3 {
-		focusLine = line
+		focusLine = line + 1 + selectedLine
 	}
 	write(m.taskStepTitle("Job policy", m.taskFocus == 3))
 	write("\n")
-	write(m.pickerRow(jobPolicyLabels, jobPolicyIndex(m.formJobPolicy)))
+	write(policy)
 	return body.String(), focusLine
 }
 
@@ -175,9 +172,17 @@ func (m model) taskStepTitle(title string, active bool) string {
 }
 
 func (m model) pickerRow(options []string, selected int) string {
+	view, _ := m.pickerLayout(options, selected)
+	return view
+}
+
+// pickerLayout returns the rendered options and the active option's row.
+func (m model) pickerLayout(options []string, selected int) (string, int) {
 	var (
 		body      strings.Builder
 		lineWidth int
+		line      int
+		active    int
 	)
 	for i, option := range options {
 		token := "[ " + option + " ]"
@@ -189,16 +194,20 @@ func (m model) pickerRow(options []string, selected int) string {
 		if lineWidth > 0 {
 			separator = 1
 		}
-		if lineWidth > 0 && lineWidth+separator+tokenWidth > m.contentWidth() {
+		if lineWidth > 0 && lineWidth+separator+tokenWidth > m.contentWidth()-1 {
 			body.WriteByte('\n')
+			line++
 			lineWidth = 0
 			separator = 0
 		}
 		if separator > 0 {
 			body.WriteString(" ")
 		}
+		if i == selected {
+			active = line
+		}
 		body.WriteString(token)
 		lineWidth += separator + tokenWidth
 	}
-	return body.String()
+	return body.String(), active
 }
