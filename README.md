@@ -76,6 +76,8 @@ Jobs run with the invoking process's environment, including an empty environment
 
 ## Development
 
+AI tools are used in the development of Taskrunner, including to generate code and documentation. Maintainers remain responsible for reviewing contributions and checking their licensing.
+
 Run these checks from the repository root:
 
 ```sh
