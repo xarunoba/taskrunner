@@ -373,3 +373,102 @@ func TestTaskRenderPrefixAndSuffixWithRawValue(t *testing.T) {
 		t.Fatalf("rendered output = %q, want %q", got, want)
 	}
 }
+
+func TestRenderDoesNotResubstitutePlaceholderLookalikes(t *testing.T) {
+	t.Parallel()
+
+	item := Task{
+		Name:    "resubstitution",
+		Command: `printf '%s\n' {{first}}`,
+		Fields: []Field{
+			{Key: "first", Label: "First", Type: FieldText},
+			{Key: "second", Label: "Second", Type: FieldText},
+		},
+	}
+	command, err := item.Render(map[string]string{
+		"first":  "{{second}}",
+		"second": `; printf INJECTED; #`,
+	})
+	if err != nil {
+		t.Fatalf("Render() error = %v", err)
+	}
+	output, err := exec.Command("/bin/sh", "-c", command).Output()
+	if err != nil {
+		t.Fatalf("execute rendered command: %v", err)
+	}
+	if got, want := string(output), "{{second}}\n"; got != want {
+		t.Fatalf("rendered output = %q, want %q", got, want)
+	}
+}
+
+func TestRenderEscapesValuesInsideDoubleQuotes(t *testing.T) {
+	t.Parallel()
+
+	item := Task{
+		Name:    "double quoted",
+		Command: `printf '%s\n' "{{value}}"`,
+		Fields: []Field{
+			{Key: "value", Label: "Value", Type: FieldText},
+		},
+	}
+	value := `$(printf INJECTED)"; rm -rf x #`
+	command, err := item.Render(map[string]string{"value": value})
+	if err != nil {
+		t.Fatalf("Render() error = %v", err)
+	}
+	output, err := exec.Command("/bin/sh", "-c", command).Output()
+	if err != nil {
+		t.Fatalf("execute rendered command: %v", err)
+	}
+	if got, want := string(output), value+"\n"; got != want {
+		t.Fatalf("rendered output = %q, want %q", got, want)
+	}
+}
+
+func TestRenderPreservesValuesInsideSingleQuotes(t *testing.T) {
+	t.Parallel()
+
+	item := Task{
+		Name:    "single quoted",
+		Command: `printf '%s\n' '{{value}}'`,
+		Fields: []Field{
+			{Key: "value", Label: "Value", Type: FieldText},
+		},
+	}
+	value := `it's "quoted" $(x)`
+	command, err := item.Render(map[string]string{"value": value})
+	if err != nil {
+		t.Fatalf("Render() error = %v", err)
+	}
+	output, err := exec.Command("/bin/sh", "-c", command).Output()
+	if err != nil {
+		t.Fatalf("execute rendered command: %v", err)
+	}
+	if got, want := string(output), value+"\n"; got != want {
+		t.Fatalf("rendered output = %q, want %q", got, want)
+	}
+}
+
+func TestRenderQuotesSameFieldPerContext(t *testing.T) {
+	t.Parallel()
+
+	item := Task{
+		Name:    "mixed contexts",
+		Command: `printf '%s %s\n' {{value}} "{{value}}"`,
+		Fields: []Field{
+			{Key: "value", Label: "Value", Type: FieldText},
+		},
+	}
+	value := `a'b"c$d`
+	command, err := item.Render(map[string]string{"value": value})
+	if err != nil {
+		t.Fatalf("Render() error = %v", err)
+	}
+	output, err := exec.Command("/bin/sh", "-c", command).Output()
+	if err != nil {
+		t.Fatalf("execute rendered command: %v", err)
+	}
+	if got, want := string(output), value+" "+value+"\n"; got != want {
+		t.Fatalf("rendered output = %q, want %q", got, want)
+	}
+}

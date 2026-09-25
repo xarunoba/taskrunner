@@ -31,6 +31,8 @@ taskrunner --help
 taskrunner run --help
 ```
 
+Task references prefer an exact filename, then a case-insensitive filename, task name, or filename without `.json`.
+
 ## Storage
 
 The current working directory is your workspace. Taskrunner keeps its tasks and runtime data under `.taskrunner/`:
@@ -42,8 +44,9 @@ The current working directory is your workspace. Taskrunner keeps its tasks and 
 | `.taskrunner/runs/` | Saved job records and output |
 | `.taskrunner/daemon.sock` | Workspace daemon's Unix socket |
 | `.taskrunner/daemon.lock` | Workspace daemon's lock file |
+| `.taskrunner/.gitignore` | Generated ignore file; shares `tasks/` and the ignore file |
 
-Create and edit tasks in the application, or edit their JSON directly. Copy files from `.taskrunner/tasks/` to another workspace to share tasks. Keep runtime history, job output, and daemon files out of version control; saved inputs and output may contain sensitive data.
+Create and edit tasks in the application, or edit their JSON directly. Copy files from `.taskrunner/tasks/` to another workspace to share tasks. Taskrunner creates `.taskrunner/.gitignore` when missing and preserves existing ignore files. The generated rules exclude saved inputs, environments, output, and daemon state, which may contain sensitive data. They do not remove files already tracked by Git.
 
 ## Configuration
 
@@ -67,7 +70,9 @@ Theme names accept letters, digits, `_`, and `-`. Keep every color role and its 
 
 Tasks execute shell commands through `$SHELL -c`, falling back to `/bin/sh`. Review shared task definitions before running them.
 
-Field values are shell-quoted by default. Raw mode inserts values as shell syntax without quoting; enable it only for trusted input.
+Argument-mode fields use POSIX/Bash template syntax. Placeholders can appear in shell arguments, quoted strings, and heredoc bodies. Values are quoted for their syntax context and are never rescanned for placeholders. Placeholders in shell expressions or identifiers are rejected because argument quoting cannot make those positions safe. Raw mode inserts trusted shell syntax without quoting; enable it only for trusted input.
+
+Jobs run with the invoking process's environment, including an empty environment. Job records save that environment in owner-only files for reruns; it may contain secrets. On restart, the daemon kills surviving job process groups whose leader PID and start time match the saved record, then marks interrupted jobs failed. A crash before that identity is saved can leave a job running. Taskrunner rejects symlinked storage directories and value-history files.
 
 ## Development
 

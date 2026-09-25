@@ -303,3 +303,54 @@ func waitForCLIJob(t *testing.T, client *daemon.Client, id string) daemon.Job {
 		time.Sleep(10 * time.Millisecond)
 	}
 }
+
+func TestFindTaskPrefersExactFileOverNameAndStem(t *testing.T) {
+	t.Parallel()
+
+	items := []task.Task{
+		{Name: "b.json", File: "b-json.json", Command: "printf shadow"},
+		{Name: "Zebra", File: "b.json", Command: "printf target"},
+	}
+
+	item, err := findTask(items, "b.json")
+	if err != nil {
+		t.Fatalf("findTask(b.json) error = %v", err)
+	}
+	if item.File != "b.json" {
+		t.Fatalf("findTask(b.json) = %q, want the task stored in b.json", item.File)
+	}
+
+	item, err = findTask(items, "zebra")
+	if err != nil {
+		t.Fatalf("findTask(zebra) error = %v", err)
+	}
+	if item.Name != "Zebra" {
+		t.Fatalf("findTask(zebra) = %q, want Zebra", item.Name)
+	}
+
+	item, err = findTask(items, "b-json")
+	if err != nil {
+		t.Fatalf("findTask(b-json) error = %v", err)
+	}
+	if item.File != "b-json.json" {
+		t.Fatalf("findTask(b-json) = %q, want b-json.json", item.File)
+	}
+}
+
+func TestFindTaskPreservesFilenameCase(t *testing.T) {
+	t.Parallel()
+
+	items := []task.Task{
+		{Name: "First", File: "A.json", Command: "printf upper"},
+		{Name: "Second", File: "a.json", Command: "printf lower"},
+	}
+	for _, name := range []string{"A.json", "a.json"} {
+		item, err := findTask(items, name)
+		if err != nil {
+			t.Fatalf("findTask(%q) error = %v", name, err)
+		}
+		if item.File != name {
+			t.Errorf("findTask(%q).File = %q", name, item.File)
+		}
+	}
+}

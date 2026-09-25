@@ -88,7 +88,7 @@ func (m model) updateMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	line := strings.TrimSpace(ansi.Cut(lines[event.Y], left, left+m.contentWidth()-1))
 	switch m.screen {
 	case screenTask:
-		return m.clickTaskForm(line, event.X)
+		return m.clickTaskForm(row, event.X)
 	case screenField:
 		return m.clickFieldForm(row, event.X)
 	case screenRun:
@@ -207,35 +207,44 @@ func runeIndex(r []rune, s string) int {
 	return -1
 }
 
-func (m model) clickTaskForm(line string, x int) (tea.Model, tea.Cmd) {
+// clickTaskForm hit-tests the task form through its rendered content rows,
+// shared with taskFormView, so a control stays clickable even when its text
+// matches another control's.
+func (m model) clickTaskForm(row, x int) (tea.Model, tea.Cmd) {
+	content, _, rows := m.taskFormLayout()
+	lines := strings.Split(content, "\n")
+	row += m.taskViewport.YOffset
+	if row < 0 || row >= len(lines) {
+		return m, nil
+	}
+	column := x - m.styles.panel.GetBorderLeftSize() - m.styles.panel.GetPaddingLeft()
 	switch {
-	case strings.HasPrefix(line, "Name") || containsNonEmpty(line, m.taskNameInput.Value()):
+	case rows.name.covers(row):
 		m.taskFocus = 0
-		m.taskNameInput.SetCursor(max(0, x-3))
+		m.taskNameInput.SetCursor(max(0, column))
 		return m, m.focusTaskControl()
-	case strings.HasPrefix(line, "Fields") || strings.Contains(line, "No fields."):
+	case rows.fields.covers(row):
 		m.taskFocus = 1
+		for i, fieldRow := range rows.field {
+			if fieldRow.covers(row) {
+				m.fieldCursor = i
+				break
+			}
+		}
 		return m, m.focusTaskControl()
-	case strings.HasPrefix(line, "Command") || containsValueLine(line, m.taskCommandInput.Value()):
+	case rows.command.covers(row):
 		m.taskFocus = 2
 		return m, m.focusTaskControl()
-	case strings.HasPrefix(line, "Job policy"):
+	case rows.policy.covers(row):
 		m.taskFocus = 3
-		m.moveJobPolicy(1)
-		return m, m.focusTaskControl()
-	case strings.Contains(line, "Sequential") || strings.Contains(line, "Parallel") || strings.Contains(line, "Cancel previous"):
-		if selected := optionAtX(line, x-3, jobPolicyLabels); selected >= 0 {
+		if row == rows.policy.start {
+			m.moveJobPolicy(1)
+			return m, m.focusTaskControl()
+		}
+		if selected := optionAtX(ansi.Strip(lines[row]), column, jobPolicyLabels); selected >= 0 {
 			m.formJobPolicy = jobPolicies[selected]
-			m.taskFocus = 3
-			return m, m.focusTaskControl()
 		}
-	}
-	for i, field := range m.formFields {
-		if strings.Contains(line, field.Label) {
-			m.taskFocus = 1
-			m.fieldCursor = i
-			return m, m.focusTaskControl()
-		}
+		return m, m.focusTaskControl()
 	}
 	return m, nil
 }
@@ -334,19 +343,6 @@ func (m model) clickRunForm(line string, x, row int) (tea.Model, tea.Cmd) {
 		}
 	}
 	return m, nil
-}
-
-func containsNonEmpty(text, value string) bool {
-	return value != "" && strings.Contains(text, value)
-}
-
-func containsValueLine(text, value string) bool {
-	for line := range strings.SplitSeq(value, "\n") {
-		if containsNonEmpty(text, line) {
-			return true
-		}
-	}
-	return false
 }
 
 func optionAtX(line string, x int, options []string) int {

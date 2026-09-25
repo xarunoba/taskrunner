@@ -52,6 +52,10 @@ type request struct {
 	JobPolicy    task.JobPolicy `json:"job_policy,omitempty"`
 	JobID        string         `json:"job_id,omitempty"`
 	OutputOffset int            `json:"output_offset,omitempty"`
+	// Env is the invoking process environment for "start" requests, so a
+	// persistent daemon executes the job with the caller's PATH, virtualenv,
+	// and exported values instead of the daemon's startup environment.
+	Env []string `json:"env"`
 }
 
 type response struct {

@@ -32,6 +32,8 @@ func NewClient(workspace string) *Client {
 	}
 }
 
+// Start submits a job for execution. The client process environment travels
+// with the request so the job runs with the caller's environment.
 func (c *Client) Start(taskID, name, command string, policy task.JobPolicy) (Job, error) {
 	result, err := c.roundTrip(request{
 		Action:    "start",
@@ -39,6 +41,7 @@ func (c *Client) Start(taskID, name, command string, policy task.JobPolicy) (Job
 		Name:      name,
 		Command:   command,
 		JobPolicy: policy,
+		Env:       os.Environ(),
 	})
 	if err != nil {
 		return Job{}, err
@@ -92,6 +95,9 @@ func (c *Client) jobAction(action, id string) (Job, error) {
 }
 
 func (c *Client) roundTrip(message request) (response, error) {
+	if err := task.RejectSymlinkedDirs(filepath.Dir(c.socket)); err != nil {
+		return response{}, fmt.Errorf("prepare workspace: %w", err)
+	}
 	conn, err := net.DialTimeout("unix", c.socket, retryInterval)
 	if err != nil {
 		if err := c.startDaemon(); err != nil {

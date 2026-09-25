@@ -75,7 +75,7 @@ func (m model) taskFieldLine(index int) string {
 }
 
 func (m model) taskFormView() string {
-	content, focusLine := m.taskFormContent()
+	content, focusLine, _ := m.taskFormLayout()
 	form := m.taskViewport
 	form.Width = max(1, m.contentWidth()-1)
 	form.Height = m.contentHeight()
@@ -95,63 +95,98 @@ func (m model) taskFormView() string {
 	return m.renderWorkspacePanel(view, screenTask)
 }
 
-func (m model) taskFormContent() (string, int) {
-	var body strings.Builder
-	line := 0
+// taskFormRows maps the task form's content rows to its controls so
+// rendering and click hit-testing share one geometry.
+type taskFormRows struct {
+	name    fieldRow
+	fields  fieldRow
+	command fieldRow
+	policy  fieldRow
+	field   []fieldRow
+}
+
+func (m model) taskFormLayout() (string, int, taskFormRows) {
+	var (
+		body strings.Builder
+		rows taskFormRows
+		line int
+	)
 	write := func(value string) {
 		body.WriteString(value)
 		line += strings.Count(value, "\n")
 	}
-	focusLine := 0
 
-	if m.taskFocus == 0 {
-		focusLine = line
-	}
+	rows.name.start = line
 	write(m.taskStepTitle("Name", m.taskFocus == 0))
 	write("\n")
 	write(m.taskNameInput.View())
+	rows.name.end = line + 1
 	write(m.gap())
 
+	rows.fields.start = line
 	write(m.taskStepTitle("Fields", m.taskFocus == 1))
 	write("\n")
 	if len(m.formFields) == 0 {
 		if m.taskFocus == 1 {
-			focusLine = line
 			write(m.styles.selected.Render("› No fields. Press a or enter to add one."))
 		} else {
 			write(m.styles.muted.Render("No fields. Press a or enter to add one."))
 		}
+		rows.fields.end = line + 1
 	} else {
+		rows.field = make([]fieldRow, len(m.formFields))
 		for i := range m.formFields {
-			if m.taskFocus == 1 && i == m.fieldCursor {
-				focusLine = line
-			}
+			rows.field[i].start = line
 			write(m.taskFieldLine(i))
+			rows.field[i].end = line + 1
 			if i < len(m.formFields)-1 {
 				write("\n")
 			}
 		}
+		rows.fields.end = line + 1
 	}
 	write(m.gap())
 
+	rows.command.start = line
 	write(m.taskStepTitle("Command template", m.taskFocus == 2))
 	write("\n")
+	commandFocus := -1
 	if m.taskFocus == 2 {
-		focusLine = line + m.taskCommandCursorLine()
+		commandFocus = line + m.taskCommandCursorLine()
 	}
 	write(m.taskCommandView())
 	write("\n")
 	write(m.styles.muted.Render("Use {{field_key}} where a runtime value belongs."))
+	rows.command.end = line + 1
 	write(m.gap())
 
+	rows.policy.start = line
 	policy, selectedLine := m.pickerLayout(jobPolicyLabels, jobPolicyIndex(m.formJobPolicy))
+	policyFocus := -1
 	if m.taskFocus == 3 {
-		focusLine = line + 1 + selectedLine
+		policyFocus = line + 1 + selectedLine
 	}
 	write(m.taskStepTitle("Job policy", m.taskFocus == 3))
 	write("\n")
 	write(policy)
-	return body.String(), focusLine
+	rows.policy.end = line + 1
+
+	focusLine := -1
+	switch {
+	case m.taskFocus == 0:
+		focusLine = rows.name.start
+	case m.taskFocus == 1 && len(m.formFields) == 0:
+		focusLine = rows.fields.start + 1
+	case m.taskFocus == 1:
+		if m.fieldCursor < len(rows.field) {
+			focusLine = rows.field[m.fieldCursor].start
+		}
+	case m.taskFocus == 2:
+		focusLine = commandFocus
+	case m.taskFocus == 3:
+		focusLine = policyFocus
+	}
+	return body.String(), focusLine, rows
 }
 
 func (m model) taskCommandCursorLine() int {

@@ -269,12 +269,33 @@ func (a *cliApp) newTaskRemoveCommand() *cobra.Command {
 	return cmd
 }
 
+// findTask prefers an exact filename, then case-insensitive filename, task
+// name, and file-stem matches.
 func findTask(items []task.Task, name string) (task.Task, error) {
-	for _, item := range items {
-		fileName := strings.TrimSuffix(item.File, filepath.Ext(item.File))
-		if strings.EqualFold(item.Name, name) || strings.EqualFold(fileName, name) || strings.EqualFold(item.File, name) {
-			return item, nil
+	var byFile, byName, byStem *task.Task
+	for i := range items {
+		item := &items[i]
+		if item.File == name {
+			return *item, nil
+		}
+		stem := strings.TrimSuffix(item.File, filepath.Ext(item.File))
+		switch {
+		case strings.EqualFold(item.File, name) && byFile == nil:
+			byFile = item
+		case strings.EqualFold(item.Name, name) && byName == nil:
+			byName = item
+		case strings.EqualFold(stem, name) && byStem == nil:
+			byStem = item
 		}
 	}
-	return task.Task{}, fmt.Errorf("task %q not found", name)
+	switch {
+	case byFile != nil:
+		return *byFile, nil
+	case byName != nil:
+		return *byName, nil
+	case byStem != nil:
+		return *byStem, nil
+	default:
+		return task.Task{}, fmt.Errorf("task %q not found", name)
+	}
 }

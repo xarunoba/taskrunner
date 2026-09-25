@@ -269,6 +269,27 @@ func (m model) updateRunFile(msg tea.Msg, field task.Field) (tea.Model, tea.Cmd)
 					m.choiceCursor = 0
 					return m, nil
 				}
+			case "up", "k":
+				if m.choiceCursor < 0 {
+					// Skip is selected: the picker stays inert.
+					return m, nil
+				}
+				if m.choiceCursor == 0 {
+					view := m.filePicker.View()
+					if m.runFileStart(view)+m.runFileCursorRow(view) == 0 {
+						// Up from the picker's first entry returns to Skip,
+						// so keyboard navigation can omit the file after
+						// browsing the picker.
+						m.choiceCursor = -1
+						return m, nil
+					}
+				}
+			default:
+				if m.choiceCursor < 0 {
+					// Skip is selected: keep the picker inert until Down
+					// enters it.
+					return m, nil
+				}
 			}
 		}
 	}

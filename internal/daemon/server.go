@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/xarunoba/taskrunner/internal/task"
 	"golang.org/x/sys/unix"
 )
 
@@ -31,8 +32,21 @@ type server struct {
 
 func Serve(workspace string, idle time.Duration) error {
 	root := filepath.Join(workspace, ".taskrunner")
+	runs := filepath.Join(root, jobHistoryDirectory)
+	if err := task.RejectSymlinkedDirs(root, runs); err != nil {
+		return fmt.Errorf("prepare workspace: %w", err)
+	}
 	if err := os.MkdirAll(root, 0o700); err != nil {
 		return fmt.Errorf("create daemon directory: %w", err)
+	}
+	if err := os.MkdirAll(runs, 0o700); err != nil {
+		return fmt.Errorf("create job history: %w", err)
+	}
+	if err := task.RejectSymlinkedDirs(root, runs); err != nil {
+		return fmt.Errorf("prepare workspace: %w", err)
+	}
+	if err := task.CreateGitignoreIfMissing(workspace); err != nil {
+		return fmt.Errorf("prepare workspace: %w", err)
 	}
 	lock, err := os.OpenFile(filepath.Join(root, "daemon.lock"), os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
@@ -152,7 +166,7 @@ func (s *server) dispatch(message request) response {
 
 	switch message.Action {
 	case "start":
-		return s.startJobLocked(message.TaskID, message.Name, message.Command, message.JobPolicy)
+		return s.startJobLocked(message.TaskID, message.Name, message.Command, message.JobPolicy, message.Env)
 	case "list":
 		jobs := make([]Job, 0, len(s.order))
 		for _, id := range s.order {
@@ -181,7 +195,7 @@ func (s *server) dispatch(message request) response {
 		if !ok {
 			return response{Error: fmt.Sprintf("job %q not found", message.JobID)}
 		}
-		return s.startJobLocked(record.TaskID, record.Name, record.Command, record.Policy)
+		return s.startJobLocked(record.TaskID, record.Name, record.Command, record.Policy, record.env)
 	case "remove":
 		record, ok := s.jobs[message.JobID]
 		if !ok {

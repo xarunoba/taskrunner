@@ -31,6 +31,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.setError(msg.err)
 			return m, nil
 		}
+		// The user may have navigated into a task, field, or run form while
+		// the daemon answered; a late reply must not hijack a draft.
+		if m.screen != screenList && m.screen != screenJobs && m.screen != screenResult {
+			return m, nil
+		}
 		m.openResult(msg.job)
 		return m, nil
 	case jobActionMsg:

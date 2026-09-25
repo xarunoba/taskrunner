@@ -135,6 +135,9 @@ func loadTaskStore() (string, *task.Store, []task.Task, error) {
 	if err != nil {
 		return "", nil, nil, err
 	}
+	if err := task.CreateGitignoreIfMissing(workspace); err != nil {
+		return "", nil, nil, fmt.Errorf("prepare workspace: %w", err)
+	}
 	store := task.NewStore(workspace)
 	items, err := store.Load()
 	if err != nil {

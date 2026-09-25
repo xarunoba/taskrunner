@@ -9,35 +9,56 @@ import (
 	"github.com/xarunoba/taskrunner/internal/task"
 )
 
-// runFormHeader renders every row above the scrollable list: task name,
-// field counter, label, the raw-mode warning when present, and the Skip row
-// for optional choice/file fields.
+// runFormHeader keeps optional Skip rows and the input visible by collapsing
+// gaps, then omitting the task name and counter when the terminal is short.
 func (m model) runFormHeader(field task.Field) string {
-	var body strings.Builder
-	body.WriteString(m.styles.accent.Render(m.runTask.Name))
-	body.WriteByte('\n')
-	body.WriteString(m.styles.muted.Render(fmt.Sprintf("Field %d of %d", m.runIndex+1, len(m.runTask.Fields))))
-	body.WriteString(m.gap())
 	label := task.ResolveKnownValues(field.Label, m.runValues)
 	if field.Optional {
 		label += " (optional)"
 	}
+	hasSkip := field.Optional && (field.Type == task.FieldChoice || field.Type == task.FieldFile)
+	gap := m.gap()
+	gapCount := 2
+	if field.Raw {
+		gapCount++
+	}
+	headerRows := 1 + strings.Count(m.runTask.Name, "\n") + strings.Count(label, "\n") + gapCount*strings.Count(gap, "\n")
+	if hasSkip {
+		headerRows++
+	}
+	limit := max(1, m.contentHeight()-1)
+	if headerRows > limit {
+		headerRows -= gapCount * (strings.Count(gap, "\n") - 1)
+		gap = "\n"
+	}
+	showName := headerRows <= limit
+	if !showName {
+		headerRows -= 1 + strings.Count(m.runTask.Name, "\n")
+	}
+	showCounter := headerRows <= limit
+
+	var body strings.Builder
+	if showName {
+		body.WriteString(m.styles.accent.Render(m.runTask.Name))
+		body.WriteByte('\n')
+	}
+	if showCounter {
+		body.WriteString(m.styles.muted.Render(fmt.Sprintf("Field %d of %d", m.runIndex+1, len(m.runTask.Fields))))
+		body.WriteString(gap)
+	}
 	body.WriteString(m.styles.step.Render(label))
-	body.WriteString(m.gap())
+	body.WriteString(gap)
 	if field.Raw {
 		body.WriteString(m.styles.error.Render("RAW MODE: this value will execute as shell syntax."))
-		body.WriteString(m.gap())
+		body.WriteString(gap)
 	}
-	switch field.Type {
-	case task.FieldChoice, task.FieldFile:
-		if field.Optional {
-			skip := "  Skip"
-			if m.choiceCursor < 0 {
-				skip = m.styles.selected.Render("› Skip")
-			}
-			body.WriteString(skip)
-			body.WriteByte('\n')
+	if hasSkip {
+		skip := "  Skip"
+		if m.choiceCursor < 0 {
+			skip = m.styles.selected.Render("› Skip")
 		}
+		body.WriteString(skip)
+		body.WriteByte('\n')
 	}
 	return body.String()
 }

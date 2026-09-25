@@ -9,7 +9,8 @@ require (
 	github.com/charmbracelet/x/ansi v0.11.6
 	github.com/muesli/termenv v0.16.0
 	github.com/spf13/cobra v1.10.2
-	golang.org/x/sys v0.38.0
+	golang.org/x/sys v0.47.0
+	mvdan.cc/sh/v3 v3.14.1
 )
 
 require (

@@ -6,10 +6,15 @@ import (
 	"github.com/xarunoba/taskrunner/internal/task"
 )
 
-// fieldRow is the content-line range [start, end) a field form control
-// occupies, titles included. end == start means the control is not rendered.
+// fieldRow is the content-line range [start, end) a form control occupies,
+// titles included. end == start means the control is not rendered.
 type fieldRow struct {
 	start, end int
+}
+
+// covers reports whether a content row lands inside the control.
+func (r fieldRow) covers(row int) bool {
+	return row >= r.start && row < r.end
 }
 
 // fieldFormLayout renders the full field form content and computes the

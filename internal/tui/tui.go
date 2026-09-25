@@ -262,6 +262,7 @@ func newInput(placeholder string, limit int) textinput.Model {
 }
 
 func (m *model) resize(width, height int) {
+	previousWidth := m.width
 	m.width = width
 	m.height = height
 
@@ -274,6 +275,15 @@ func (m *model) resize(width, height int) {
 	m.runInput.Width = inputWidth
 	m.resizeFilePicker()
 	m.resizeResultViewport()
+	if previousWidth != width && m.result.ID != "" {
+		// The rendered command wraps at the viewport width; completed jobs
+		// get no further detail polls, so rebuild their content here.
+		atBottom := m.resultViewport.AtBottom()
+		m.setResultContent()
+		if atBottom {
+			m.resultViewport.GotoBottom()
+		}
+	}
 }
 
 func (m model) contentWidth() int {
