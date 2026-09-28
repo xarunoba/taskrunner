@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 
@@ -15,8 +16,8 @@ import (
 func advertisedFooterKey(t *testing.T, view, descriptor string) tea.KeyMsg {
 	t.Helper()
 	lines := strings.Split(ansi.Strip(view), "\n")
-	for i := len(lines) - 1; i >= 0; i-- {
-		words := strings.Fields(lines[i])
+	for _, line := range slices.Backward(lines) {
+		words := strings.Fields(line)
 		for j, word := range words {
 			if word != descriptor || j == 0 {
 				continue

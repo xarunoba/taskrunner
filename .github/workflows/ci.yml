@@ -2,8 +2,16 @@ name: CI
 
 on:
   pull_request:
+    paths:
+      - "**.go"
+      - "go.mod"
+      - "go.sum"
   push:
     branches: [main]
+    paths:
+      - "**.go"
+      - "go.mod"
+      - "go.sum"
 
 permissions:
   contents: read
@@ -18,6 +26,8 @@ jobs:
           go-version-file: go.mod
       - name: gofmt
         run: test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }
+      - name: go fix
+        run: go fix -diff ./...
       - name: go vet
         run: go vet ./...
       - name: go test

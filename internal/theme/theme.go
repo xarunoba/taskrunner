@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -407,9 +408,7 @@ func decodeConfig(raw []byte) (config, error) {
 // replaced and every unknown key preserved.
 func (c config) object() map[string]json.RawMessage {
 	object := make(map[string]json.RawMessage, len(c.unknown)+1)
-	for key, value := range c.unknown {
-		object[key] = value
-	}
+	maps.Copy(object, c.unknown)
 	object["theme"], _ = json.Marshal(c.theme)
 	return object
 }

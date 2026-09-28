@@ -140,16 +140,14 @@ func (s *server) startJobLocked(taskID, name, command string, policy task.JobPol
 	s.sequence++
 	id := strconv.FormatInt(time.Now().UnixNano(), 36) + "-" + strconv.FormatUint(s.sequence, 36)
 	record := &jobRecord{
-		Job: Job{
-			ID:        id,
-			TaskID:    taskID,
-			Name:      name,
-			Command:   command,
-			Policy:    policy,
-			Status:    StatusQueued,
-			CreatedAt: time.Now(),
-		},
-		env: env,
+		ID:        id,
+		TaskID:    taskID,
+		Name:      name,
+		Command:   command,
+		Policy:    policy,
+		Status:    StatusQueued,
+		CreatedAt: time.Now(),
+		env:       env,
 	}
 	s.jobs[id] = record
 	s.order = append(s.order, id)

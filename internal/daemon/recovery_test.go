@@ -126,17 +126,15 @@ func TestRecoveryKillsOrphanedProcessGroup(t *testing.T) {
 
 	id := "recovery-orphan"
 	stored := persistedJob{
-		Job: Job{
-			ID:        id,
-			TaskID:    "orphan.json",
-			Name:      "Orphan",
-			Command:   "sleep 30",
-			Status:    StatusRunning,
-			CreatedAt: time.Now(),
-			StartedAt: time.Now(),
-		},
-		Pid:      orphan.Process.Pid,
-		PidStart: procStartTime(orphan.Process.Pid),
+		ID:        id,
+		TaskID:    "orphan.json",
+		Name:      "Orphan",
+		Command:   "sleep 30",
+		Status:    StatusRunning,
+		CreatedAt: time.Now(),
+		StartedAt: time.Now(),
+		Pid:       orphan.Process.Pid,
+		PidStart:  procStartTime(orphan.Process.Pid),
 	}
 	raw, err := json.Marshal(stored)
 	if err != nil {
@@ -176,17 +174,15 @@ func TestRecoveryLeavesUnrelatedPidAlone(t *testing.T) {
 	// time (PID reuse) must not be killed.
 	id := "recovery-stale"
 	stored := persistedJob{
-		Job: Job{
-			ID:        id,
-			TaskID:    "stale.json",
-			Name:      "Stale",
-			Command:   "sleep 30",
-			Status:    StatusRunning,
-			CreatedAt: time.Now(),
-			StartedAt: time.Now(),
-		},
-		Pid:      outside.Process.Pid,
-		PidStart: procStartTime(outside.Process.Pid) + 1,
+		ID:        id,
+		TaskID:    "stale.json",
+		Name:      "Stale",
+		Command:   "sleep 30",
+		Status:    StatusRunning,
+		CreatedAt: time.Now(),
+		StartedAt: time.Now(),
+		Pid:       outside.Process.Pid,
+		PidStart:  procStartTime(outside.Process.Pid) + 1,
 	}
 	raw, err := json.Marshal(stored)
 	if err != nil {
