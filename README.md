@@ -4,16 +4,16 @@ Save shell commands as tasks with prompts, run them from a terminal UI or CLI, a
 
 ## Installation
 
-Requires Linux and Go 1.27.1 or newer. From the repository root:
+Requires Linux and Go 1.27.1 or newer. Install or update to the latest release:
 
 ```sh
-go install .
+go install github.com/xarunoba/taskrunner@latest
 ```
 
-Or build a local binary:
+To install a specific release:
 
 ```sh
-go build -o taskrunner .
+go install github.com/xarunoba/taskrunner@v0.1.0
 ```
 
 ## Versions
@@ -28,9 +28,10 @@ Run from the directory whose tasks you want to use:
 taskrunner
 ```
 
-Press `?` for keybinds (`F1` while editing text). For CLI commands and options:
+Press `?` for keybinds and the application version (`F1` while editing text). For the CLI version, commands, and options:
 
 ```sh
+taskrunner --version
 taskrunner --help
 taskrunner run --help
 ```

@@ -6,6 +6,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/xarunoba/taskrunner/internal/task"
+	"github.com/xarunoba/taskrunner/internal/version"
 )
 
 type helpBinding struct {
@@ -127,10 +128,10 @@ func (m model) helpGroups() []helpGroup {
 
 func (m model) helpContent() string {
 	var body strings.Builder
+	title := "Taskrunner v" + version.Current()
+	body.WriteString(m.styles.accent.Render(title))
 	for _, group := range m.helpGroups() {
-		if body.Len() > 0 {
-			body.WriteString("\n\n")
-		}
+		body.WriteString("\n\n")
 		if group.title != "" {
 			body.WriteString(m.styles.accent.Render(group.title))
 			body.WriteByte('\n')

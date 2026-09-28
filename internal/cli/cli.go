@@ -11,6 +11,7 @@ import (
 	"github.com/xarunoba/taskrunner/internal/task"
 	"github.com/xarunoba/taskrunner/internal/theme"
 	"github.com/xarunoba/taskrunner/internal/tui"
+	"github.com/xarunoba/taskrunner/internal/version"
 )
 
 type cliApp struct {
@@ -33,6 +34,7 @@ func newRootCommand(stdin io.Reader, stdout, stderr io.Writer) *cobra.Command {
 	}
 	root := &cobra.Command{
 		Use:           "taskrunner",
+		Version:       version.Current(),
 		Short:         "Run workspace tasks",
 		Long:          "Taskrunner stores and runs tasks for the current workspace. Run without a command to open the TUI.",
 		Args:          cobra.NoArgs,
