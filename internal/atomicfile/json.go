@@ -24,8 +24,26 @@ func WriteJSONNewOnly(path string, mode fs.FileMode, value any) error {
 	return writeJSON(path, mode, value, true)
 }
 
+// WriteStringNewOnly atomically creates path with contents, leaving an existing
+// destination untouched. The destination directory must already exist.
+func WriteStringNewOnly(path string, mode fs.FileMode, contents string) error {
+	return writeFile(path, mode, true, func(file *os.File) error {
+		_, err := file.WriteString(contents)
+		return err
+	})
+}
+
 func writeJSON(path string, mode fs.FileMode, value any, newOnly bool) error {
-	file, err := os.CreateTemp(filepath.Dir(path), ".json-*.tmp")
+	return writeFile(path, mode, newOnly, func(file *os.File) error {
+		encoder := json.NewEncoder(file)
+		encoder.SetIndent("", "  ")
+		encoder.SetEscapeHTML(false)
+		return encoder.Encode(value)
+	})
+}
+
+func writeFile(path string, mode fs.FileMode, newOnly bool, writeContents func(*os.File) error) error {
+	file, err := os.CreateTemp(filepath.Dir(path), ".atomic-*.tmp")
 	if err != nil {
 		return fmt.Errorf("create temporary file: %w", err)
 	}
@@ -33,13 +51,9 @@ func writeJSON(path string, mode fs.FileMode, value any, newOnly bool) error {
 	defer func() {
 		_ = os.Remove(tempName) // Rename removes this path on success.
 	}()
-
-	encoder := json.NewEncoder(file)
-	encoder.SetIndent("", "  ")
-	encoder.SetEscapeHTML(false)
-	if err := encoder.Encode(value); err != nil {
+	if err := writeContents(file); err != nil {
 		_ = file.Close()
-		return fmt.Errorf("encode JSON: %w", err)
+		return fmt.Errorf("write temporary file: %w", err)
 	}
 	// Chmod before Sync: the permission change is metadata and must hit
 	// disk together with the data, or a crash can leave the old mode.

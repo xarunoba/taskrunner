@@ -16,6 +16,10 @@ Or build a local binary:
 go build -o taskrunner .
 ```
 
+## Versions
+
+Releases use SemVer tags. During 0.x development, incompatible changes to the CLI, task JSON, or persisted job records increment the minor version; compatible fixes increment the patch version. Version 1.0.0 will mark the stable public contract.
+
 ## Usage
 
 Run from the directory whose tasks you want to use:
@@ -46,7 +50,7 @@ The current working directory is your workspace. Taskrunner keeps its tasks and 
 | `.taskrunner/daemon.lock` | Workspace daemon's lock file |
 | `.taskrunner/.gitignore` | Generated ignore file; shares `tasks/` and the ignore file |
 
-Create and edit tasks in the application, or edit their JSON directly. Copy files from `.taskrunner/tasks/` to another workspace to share tasks. Taskrunner creates `.taskrunner/.gitignore` when missing and preserves existing ignore files. The generated rules exclude saved inputs, environments, output, and daemon state, which may contain sensitive data. They do not remove files already tracked by Git.
+Create and edit tasks in the application, or edit their JSON directly. Copy files from `.taskrunner/tasks/` to another workspace to share tasks. Saving a task or starting the daemon creates `.taskrunner/.gitignore` when missing; listing and validating tasks do not change the workspace. Existing ignore files are preserved. The generated rules exclude saved inputs, environments, output, and daemon state, which may contain sensitive data. They do not remove files already tracked by Git.
 
 ## Configuration
 

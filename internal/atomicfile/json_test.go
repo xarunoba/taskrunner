@@ -66,3 +66,30 @@ func TestWriteJSONNewOnlyNeverReplaces(t *testing.T) {
 		t.Fatalf("temporary files leaked: %d entries", len(entries))
 	}
 }
+
+func TestFailedWriteDoesNotPublishPartialFile(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".gitignore")
+	failure := errors.New("injected write failure")
+	err := writeFile(path, 0o644, true, func(file *os.File) error {
+		if _, err := file.WriteString("/*\n"); err != nil {
+			return err
+		}
+		return failure
+	})
+	if !errors.Is(err, failure) {
+		t.Fatalf("writeFile() error = %v, want injected failure", err)
+	}
+	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("partial destination exists: %v", err)
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("temporary files leaked: %d entries", len(entries))
+	}
+}

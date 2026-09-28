@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"github.com/xarunoba/taskrunner/internal/atomicfile"
 )
 
 // gitignoreContent keeps only task definitions shareable; value history,
@@ -21,16 +23,17 @@ func CreateGitignoreIfMissing(workspace string) error {
 	if err := RejectSymlinkedDirs(dir); err != nil {
 		return err
 	}
-	file, err := os.OpenFile(filepath.Join(dir, ".gitignore"), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
-	if errors.Is(err, os.ErrExist) {
+	path := filepath.Join(dir, ".gitignore")
+	if _, err := os.Lstat(path); err == nil {
 		return nil
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("inspect gitignore: %w", err)
 	}
-	if err != nil {
+	if err := atomicfile.WriteStringNewOnly(path, 0o644, gitignoreContent); err != nil {
+		if errors.Is(err, os.ErrExist) {
+			return nil
+		}
 		return fmt.Errorf("create gitignore: %w", err)
 	}
-	if _, err := file.WriteString(gitignoreContent); err != nil {
-		file.Close()
-		return fmt.Errorf("write gitignore: %w", err)
-	}
-	return file.Close()
+	return nil
 }

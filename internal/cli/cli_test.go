@@ -51,6 +51,19 @@ func TestRunCommandWithPreseededFields(t *testing.T) {
 	}
 }
 
+func TestTasksDoesNotCreateWorkspaceState(t *testing.T) {
+	workspace := t.TempDir()
+	t.Chdir(workspace)
+
+	var stdout, stderr bytes.Buffer
+	if err := Execute([]string{"tasks"}, strings.NewReader(""), &stdout, &stderr); err != nil {
+		t.Fatalf("list tasks: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(workspace, ".taskrunner")); !os.IsNotExist(err) {
+		t.Fatalf("list tasks created workspace state: %v", err)
+	}
+}
+
 func TestPrepareTaskValuesAllowsOmittedOptionalFields(t *testing.T) {
 	t.Parallel()
 

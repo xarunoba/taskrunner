@@ -86,6 +86,9 @@ func (s *Store) Save(item Task, previousFile string) (Task, error) {
 		return Task{}, err
 	}
 
+	if err := CreateGitignoreIfMissing(s.workspace); err != nil {
+		return Task{}, fmt.Errorf("prepare workspace: %w", err)
+	}
 	if err := RejectSymlinkedDirs(s.taskRunnerDir(), s.dir); err != nil {
 		return Task{}, err
 	}

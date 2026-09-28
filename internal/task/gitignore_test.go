@@ -13,6 +13,13 @@ func TestCreateGitignoreIfMissing(t *testing.T) {
 	if err := CreateGitignoreIfMissing(workspace); err != nil {
 		t.Fatalf("create gitignore: %v", err)
 	}
+	generated, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read generated gitignore: %v", err)
+	}
+	if string(generated) != gitignoreContent {
+		t.Fatalf("generated gitignore = %q, want %q", generated, gitignoreContent)
+	}
 
 	custom := "# keep tasks only\n"
 	if err := os.WriteFile(path, []byte(custom), 0o644); err != nil {
