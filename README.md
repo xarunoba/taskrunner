@@ -1,6 +1,6 @@
 # Taskrunner
 
-Save shell commands as tasks with prompts, run them from a terminal UI or CLI, and watch job output. Jobs keep running after you close the terminal.
+Taskrunner is a Linux terminal UI and CLI for saved shell commands. Define input prompts, reuse the task, and inspect its job output. A local daemon keeps jobs running after the terminal closes.
 
 ## Installation
 
@@ -37,6 +37,28 @@ taskrunner run --help
 ```
 
 Task references prefer an exact filename, then a case-insensitive filename, task name, or filename without `.json`.
+
+### Example task
+
+Create `.taskrunner/tasks/find-files.json` in your project, including the parent directories:
+
+```json
+{
+  "name": "Find files",
+  "command": "find . -type f -name {{pattern}}",
+  "fields": [
+    {"key": "pattern", "label": "File name pattern", "type": "text"}
+  ]
+}
+```
+
+Open `taskrunner` to select the task and enter a pattern, or run it directly:
+
+```sh
+taskrunner run find-files --set 'pattern=*.go'
+```
+
+This lists Go files under the current directory. Taskrunner quotes the pattern so the shell passes it to `find` without expanding it first.
 
 ## Storage
 
@@ -81,20 +103,20 @@ Jobs run with the invoking process's environment, including an empty environment
 
 ## Development
 
-AI tools are used in the development of Taskrunner, including to generate code and documentation. Maintainers remain responsible for reviewing contributions and checking their licensing.
+The [CI workflow](.github/workflows/ci.yml) checks formatting, runs `go vet` and race tests, and builds the project. The [license workflow](.github/workflows/license.yml) checks dependency licenses when `go.mod` or `go.sum` changes.
 
 Run these checks from the repository root:
 
 ```sh
 gofmt -w .
-go test ./...
+go test -race ./...
 go vet ./...
 go build ./...
 ```
 
 For TUI changes, also exercise the binary in narrow/short and wide/tall terminals. Update `THIRD_PARTY_NOTICES` when changing dependencies.
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution and code-provenance requirements.
+AI tools are used to generate and revise code and documentation in this project. Maintainers are responsible for reviewing contributions and checking their licensing. See [CONTRIBUTING.md](CONTRIBUTING.md) for review, verification, and disclosure requirements.
 
 ## License
 
