@@ -117,7 +117,7 @@ func (a *cliApp) runTUI(taskName string, create bool) error {
 	if taskName == "" {
 		return tui.Run(store, items, themes, selected, a.stdin, a.stdout)
 	}
-	item, err := findTask(items, taskName)
+	item, err := findValidTask(store, items, taskName)
 	if err != nil {
 		return err
 	}

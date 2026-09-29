@@ -24,6 +24,7 @@ type Job struct {
 	Policy       task.JobPolicy `json:"job_policy,omitempty"`
 	Status       Status         `json:"status"`
 	Output       string         `json:"output,omitempty"`
+	OutputStart  int            `json:"output_start,omitempty"`
 	OutputSize   int            `json:"output_size"`
 	Error        string         `json:"error,omitempty"`
 	StorageError string         `json:"storage_error,omitempty"`
@@ -62,4 +63,8 @@ type response struct {
 	Job   *Job   `json:"job,omitempty"`
 	Jobs  []Job  `json:"jobs,omitempty"`
 	Error string `json:"error,omitempty"`
+	// Warnings carries job history read diagnostics, each naming the
+	// offending path and the reason it was skipped. They repeat on every
+	// response until the daemon restarts.
+	Warnings []string `json:"warnings,omitempty"`
 }

@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -230,7 +231,7 @@ func TestJobCLIListsActiveJobsAndManagesHistory(t *testing.T) {
 	}
 
 	var output bytes.Buffer
-	if err := executeJobs(workspace, jobListOptions{}, &output); err != nil {
+	if err := executeJobs(workspace, jobListOptions{}, &output, io.Discard); err != nil {
 		t.Fatalf("executeJobs(active) error = %v", err)
 	}
 	if !strings.Contains(output.String(), active.ShortID()) {
@@ -241,7 +242,7 @@ func TestJobCLIListsActiveJobsAndManagesHistory(t *testing.T) {
 	}
 
 	output.Reset()
-	if err := executeJobs(workspace, jobListOptions{all: true}, &output); err != nil {
+	if err := executeJobs(workspace, jobListOptions{all: true}, &output, io.Discard); err != nil {
 		t.Fatalf("executeJobs(all) error = %v", err)
 	}
 	for _, job := range []daemon.Job{completed, active} {
@@ -251,19 +252,19 @@ func TestJobCLIListsActiveJobsAndManagesHistory(t *testing.T) {
 	}
 
 	output.Reset()
-	if err := executeJobLogsByReference(workspace, completed.ShortID(), jobLogsOptions{tail: -1}, &output); err != nil {
+	if err := executeJobLogsByReference(workspace, completed.ShortID(), jobLogsOptions{tail: -1}, &output, io.Discard); err != nil {
 		t.Fatalf("executeJobLogsByReference() error = %v", err)
 	}
 	if got, want := output.String(), "complete"; got != want {
 		t.Fatalf("job logs = %q, want %q", got, want)
 	}
-	if err := executeJobByReference(workspace, completed.ShortID(), jobRemove, false, &output); err != nil {
+	if err := executeJobByReference(workspace, completed.ShortID(), jobRemove, false, &output, io.Discard); err != nil {
 		t.Fatalf("executeJobByReference(remove) error = %v", err)
 	}
 	if _, err := client.Job(completed.ID, 0); err == nil {
 		t.Fatal("removed job remains available")
 	}
-	if err := executeJobByReference(workspace, active.ShortID(), jobCancel, false, &output); err != nil {
+	if err := executeJobByReference(workspace, active.ShortID(), jobCancel, false, &output, io.Discard); err != nil {
 		t.Fatalf("executeJobByReference(cancel) error = %v", err)
 	}
 	waitForCLIJob(t, client, active.ID)

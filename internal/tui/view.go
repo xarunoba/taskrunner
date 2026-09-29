@@ -85,8 +85,12 @@ func (m model) footerLayout() footerLayout {
 		if m.acceptsTextInput() {
 			settingsKey, helpKey = "f4", "f1"
 		}
+		helpDescriptor := "keybinds"
+		if m.hasLoadWarnings() {
+			helpDescriptor = "warnings"
+		}
 		layout.buttons[layout.count] = footerButton{key: settingsKey, descriptor: "settings"}
-		layout.buttons[layout.count+1] = footerButton{key: helpKey, descriptor: "keybinds"}
+		layout.buttons[layout.count+1] = footerButton{key: helpKey, descriptor: helpDescriptor}
 		layout.count += 2
 	}
 	var rowWidths [3]int
@@ -112,6 +116,10 @@ func (m model) footerLayout() footerLayout {
 		button.x += 1 + layout.width - rowWidths[button.row]
 	}
 	return layout
+}
+
+func (m model) hasLoadWarnings() bool {
+	return len(m.daemonWarnings) > 0 || len(m.store.LoadWarnings()) > 0
 }
 
 func (m model) View() string {

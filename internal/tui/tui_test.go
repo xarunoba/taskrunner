@@ -612,7 +612,7 @@ func TestOpenTaskLogAppendsLiveOutput(t *testing.T) {
 		details: map[string]daemon.Job{
 			"run-live": {
 				ID: "run-live", TaskID: "build.json", Name: "Build",
-				Status: daemon.StatusSucceeded, Output: "second\n", OutputSize: 13,
+				Status: daemon.StatusSucceeded, Output: "first\nsecond\n", OutputSize: 13,
 			},
 		},
 	})

@@ -130,6 +130,20 @@ func (m model) helpContent() string {
 	var body strings.Builder
 	title := "Taskrunner v" + version.Current()
 	body.WriteString(m.styles.accent.Render(title))
+	if m.hasLoadWarnings() {
+		body.WriteString("\n\n")
+		body.WriteString(m.styles.error.Render("Load warnings"))
+		for _, warning := range m.store.LoadWarnings() {
+			body.WriteByte('\n')
+			body.WriteString(ansi.Hardwrap(ansi.Strip(warning.Error()), max(1, m.helpViewport.Width), true))
+		}
+		for _, warning := range m.daemonWarnings {
+			body.WriteByte('\n')
+			body.WriteString(ansi.Hardwrap(ansi.Strip(warning), max(1, m.helpViewport.Width), true))
+		}
+		body.WriteByte('\n')
+		body.WriteString(ansi.Hardwrap("Repair the named files or move them outside the tasks/runs directory. Invalid files are preserved.", max(1, m.helpViewport.Width), true))
+	}
 	for _, group := range m.helpGroups() {
 		body.WriteString("\n\n")
 		if group.title != "" {
@@ -179,14 +193,17 @@ func (m model) compactModal() bool {
 }
 
 func (m *model) syncHelpViewport() {
-	content := m.helpContent()
-	lineCount := strings.Count(content, "\n") + 1
-	if m.compactModal() {
+	compact := m.compactModal()
+	if compact {
 		m.helpViewport.Width = max(1, m.contentWidth()-1)
 		m.helpViewport.Height = m.contentHeight()
 	} else {
 		modalWidth := min(72, max(1, m.width-8))
 		m.helpViewport.Width = max(1, modalWidth-m.styles.helpModal.GetHorizontalFrameSize())
+	}
+	content := m.helpContent()
+	if !compact {
+		lineCount := strings.Count(content, "\n") + 1
 		maxHeight := max(1, m.height-6-m.styles.helpModal.GetVerticalFrameSize())
 		m.helpViewport.Height = min(lineCount, maxHeight)
 	}

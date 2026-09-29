@@ -4,10 +4,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -23,6 +26,31 @@ const (
 type Client struct {
 	workspace string
 	socket    string
+	mu        sync.Mutex
+	// warnings holds history diagnostics from the most recent response.
+	warnings []string
+}
+
+// Warnings returns diagnostics from the most recent daemon response, such as
+// job history records skipped at startup because they are corrupt or exceed
+// the retained-output bound. Each warning names the offending path and the
+// reason; records are never modified or deleted. The result is empty before
+// the first call and whenever the last response carried no warnings.
+func (c *Client) Warnings() []string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if len(c.warnings) == 0 {
+		return nil
+	}
+	out := make([]string, len(c.warnings))
+	copy(out, c.warnings)
+	return out
+}
+
+func (c *Client) setWarnings(warnings []string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.warnings = warnings
 }
 
 func NewClient(workspace string) *Client {
@@ -100,9 +128,11 @@ func (c *Client) roundTrip(message request) (response, error) {
 	}
 	conn, err := net.DialTimeout("unix", c.socket, retryInterval)
 	if err != nil {
-		if err := c.startDaemon(); err != nil {
-			return response{}, err
+		output, startErr := c.startDaemon()
+		if startErr != nil {
+			return response{}, startErr
 		}
+		defer output.Close()
 		deadline := time.Now().Add(connectTimeout)
 		for {
 			conn, err = net.DialTimeout("unix", c.socket, retryInterval)
@@ -110,7 +140,14 @@ func (c *Client) roundTrip(message request) (response, error) {
 				break
 			}
 			if time.Now().After(deadline) {
-				return response{}, fmt.Errorf("connect to daemon: %w", err)
+				err = fmt.Errorf("connect to daemon: %w", err)
+				// The freshly started daemon likely exited with a startup
+				// error; surface its diagnostics instead of the generic
+				// socket failure.
+				if output := readDaemonStartupError(output); output != "" {
+					err = fmt.Errorf("%w\n%s", err, output)
+				}
+				return response{}, err
 			}
 			time.Sleep(retryInterval)
 		}
@@ -126,28 +163,48 @@ func (c *Client) roundTrip(message request) (response, error) {
 	if err := json.NewDecoder(conn).Decode(&result); err != nil {
 		return response{}, fmt.Errorf("read daemon response: %w", err)
 	}
+	c.setWarnings(result.Warnings)
 	if result.Error != "" {
 		return response{}, errors.New(result.Error)
 	}
 	return result, nil
 }
 
-func (c *Client) startDaemon() error {
+func (c *Client) startDaemon() (*os.File, error) {
 	if err := os.MkdirAll(filepath.Dir(c.socket), 0o700); err != nil {
-		return fmt.Errorf("create daemon directory: %w", err)
+		return nil, fmt.Errorf("create daemon directory: %w", err)
 	}
 	executable, err := os.Executable()
 	if err != nil {
-		return fmt.Errorf("locate taskrunner executable: %w", err)
+		return nil, fmt.Errorf("locate taskrunner executable: %w", err)
 	}
+	output, writer, err := os.Pipe()
+	if err != nil {
+		return nil, fmt.Errorf("capture daemon startup error: %w", err)
+	}
+	defer writer.Close()
 	cmd := exec.Command(executable, "__daemon", c.workspace)
 	cmd.Dir = c.workspace
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	cmd.Stdout = writer
+	cmd.Stderr = writer
 	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("start daemon: %w", err)
+		output.Close()
+		return nil, fmt.Errorf("start daemon: %w", err)
 	}
 	if err := cmd.Process.Release(); err != nil {
-		return fmt.Errorf("release daemon process: %w", err)
+		output.Close()
+		return nil, fmt.Errorf("release daemon process: %w", err)
 	}
-	return nil
+	return output, nil
+}
+
+func readDaemonStartupError(output *os.File) string {
+	if err := output.SetReadDeadline(time.Now().Add(250 * time.Millisecond)); err != nil {
+		return ""
+	}
+	// A slow exit may hit the deadline after writing its diagnostic. Keep
+	// those bytes, but never wait indefinitely or read unbounded output.
+	data, _ := io.ReadAll(io.LimitReader(output, 8192))
+	return strings.TrimSpace(string(data))
 }

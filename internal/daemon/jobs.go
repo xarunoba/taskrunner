@@ -17,45 +17,149 @@ import (
 	"golang.org/x/sys/unix"
 )
 
+// maxRetainedOutput bounds the output retained per job, in memory and on
+// disk. Older bytes are dropped; Job.OutputStart records the absolute
+// offset of the first retained byte so consumers can detect the gap.
+const maxRetainedOutput = 1 << 20
+
+// synchronizedBuffer keeps at most maxRetainedOutput bytes of job output in
+// a ring. It grows only to the retained size; eviction advances the head.
 type synchronizedBuffer struct {
-	mu sync.Mutex
-	b  bytes.Buffer
+	mu    sync.Mutex
+	data  []byte // ring, grown lazily up to maxRetainedOutput
+	head  int    // index in data of the first retained byte
+	start int    // absolute offset of data[head]
+	total int    // absolute offset just past the last written byte
 }
 
 func (b *synchronizedBuffer) Write(data []byte) (int, error) {
+	if len(data) == 0 {
+		return 0, nil
+	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	return b.b.Write(data)
+	filled := b.total - b.start
+	if needed := min(maxRetainedOutput, filled+len(data)); needed > len(b.data) {
+		grown := make([]byte, min(maxRetainedOutput, max(needed, 2*len(b.data), 1024)))
+		if filled > 0 && len(data) < maxRetainedOutput {
+			first := min(filled, len(b.data)-b.head)
+			copy(grown, b.data[b.head:b.head+first])
+			copy(grown[first:], b.data[:filled-first])
+		}
+		b.data = grown
+		b.head = 0
+	}
+	if len(data) >= len(b.data) {
+		copy(b.data, data[len(data)-len(b.data):])
+		b.head = 0
+		b.start = b.total + len(data) - len(b.data)
+	} else {
+		write := (b.head + filled) % len(b.data)
+		copied := copy(b.data[write:], data)
+		copy(b.data, data[copied:])
+		if over := filled + len(data) - len(b.data); over > 0 {
+			b.head = (b.head + over) % len(b.data)
+			b.start += over
+		}
+	}
+	b.total += len(data)
+	return len(data), nil
 }
 
-func (b *synchronizedBuffer) store(value string) {
+// restore replaces the retained window with value, whose first byte sits at
+// absolute offset start. Windows larger than the capacity keep only their
+// tail, matching what a live job would have retained.
+func (b *synchronizedBuffer) restore(value string, start int) {
+	if start < 0 {
+		start = 0
+	}
+	if len(value) > maxRetainedOutput {
+		start += len(value) - maxRetainedOutput
+		value = value[len(value)-maxRetainedOutput:]
+	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	b.b.Reset()
-	b.b.WriteString(value)
+	if len(b.data) < len(value) {
+		b.data = make([]byte, len(value))
+	}
+	copy(b.data, value)
+	b.head = 0
+	b.start = start
+	b.total = start + len(value)
+}
+
+// boundaries returns the absolute offset of the first byte the window
+// presents and the absolute offset of the last complete UTF-8 sequence
+// (or the end of data when flush is set). Leading continuation bytes whose
+// lead byte was evicted are dropped so the window never begins mid-rune;
+// the returned start accounts for them.
+func (b *synchronizedBuffer) boundaries(flush bool) (start, end int) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.boundariesLocked(flush)
+}
+
+func (b *synchronizedBuffer) boundariesLocked(flush bool) (start, end int) {
+	start = b.start
+	filled := b.total - b.start
+	for trimmed := 0; b.start > 0 && trimmed < 3 && trimmed < filled; trimmed++ {
+		if lead := b.data[(b.head+trimmed)%len(b.data)]; lead < 0x80 || lead >= 0xC0 {
+			break
+		}
+		start++
+	}
+	end = b.total
+	if !flush {
+		end = start + b.tailBoundaryLocked(start)
+	}
+	return start, end
+}
+
+// tailBoundaryLocked returns the length of the retained window cut after its
+// last complete or permanently invalid UTF-8 sequence, relative to start.
+// An incomplete trailing sequence is withheld until its remaining bytes
+// arrive. boundaries must already hold the lock.
+func (b *synchronizedBuffer) tailBoundaryLocked(start int) int {
+	filled := b.total - start
+	if filled == 0 {
+		return 0
+	}
+	tail := min(filled, 4)
+	var scratch [4]byte
+	head := b.head + (start - b.start) + filled - tail
+	for i := range tail {
+		scratch[i] = b.data[(head+i)%len(b.data)]
+	}
+	return utf8Boundary(scratch[:tail]) + filled - tail
 }
 
 // from returns the buffered output from offset up to the last complete
-// UTF-8 sequence, plus the boundary length clients use as their next
-// offset. A multibyte character still being written is withheld so JSON
-// encoding never replaces a split rune with U+FFFD. Once the job is done
-// no further bytes can arrive, so flush delivers the trailing bytes with
-// any incomplete sequence replaced by U+FFFD rather than dropping them.
-func (b *synchronizedBuffer) from(offset int, flush bool) (string, int) {
+// UTF-8 sequence, the absolute offset of the first retained byte, and the
+// boundary length clients use as their next offset. A multibyte character
+// still being written is withheld so JSON encoding never replaces a split
+// rune with U+FFFD. Once the job is done no further bytes can arrive, so
+// flush delivers the trailing bytes with any incomplete sequence replaced
+// by U+FFFD rather than dropping them. A stale offset (before the window
+// start or past the end) delivers the whole window; consumers compare the
+// requested offset against the returned start to detect omitted bytes.
+func (b *synchronizedBuffer) from(offset int, flush bool) (text string, start, end int) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	data := b.b.Bytes()
-	if offset < 0 || offset > len(data) {
-		offset = 0
+	start, end = b.boundariesLocked(flush)
+	if offset < start || offset > end {
+		offset = start
 	}
-	end := utf8Boundary(data)
-	if flush {
-		end = len(data)
+	if offset == end {
+		return "", start, end
 	}
-	if offset > end {
-		offset = end
-	}
-	return string(data[offset:end]), end
+	filled := end - offset
+	cursor := (b.head + offset - b.start) % len(b.data)
+	first := min(filled, len(b.data)-cursor)
+	var output strings.Builder
+	output.Grow(filled)
+	output.Write(b.data[cursor : cursor+first])
+	output.Write(b.data[:filled-first])
+	return output.String(), start, end
 }
 
 // utf8Boundary returns the length of data cut after the last complete or
@@ -175,9 +279,10 @@ func (s *server) snapshotLocked(record *jobRecord, outputOffset int, includeOutp
 	job := record.Job
 	flush := record.Done()
 	if includeOutput {
-		job.Output, job.OutputSize = record.output.from(outputOffset, flush)
+		job.Output, job.OutputStart, job.OutputSize = record.output.from(outputOffset, flush)
 	} else {
-		_, job.OutputSize = record.output.from(0, flush)
+		// Metadata snapshots must not materialize the retained window.
+		job.OutputStart, job.OutputSize = record.output.boundaries(flush)
 	}
 	return job
 }

@@ -18,12 +18,12 @@ func TestOutputFromWithholdsIncompleteUTF8Sequence(t *testing.T) {
 
 	var buffer synchronizedBuffer
 	buffer.Write([]byte("a\xE2"))
-	chunk, size := buffer.from(0, false)
+	chunk, _, size := buffer.from(0, false)
 	if chunk != "a" || size != 1 {
 		t.Fatalf("partial rune: chunk = %q size = %d, want %q 1", chunk, size, "a")
 	}
 	buffer.Write([]byte("\x82\xAC\n"))
-	chunk, size = buffer.from(size, false)
+	chunk, _, size = buffer.from(size, false)
 	if chunk != "€\n" || size != 5 {
 		t.Fatalf("completed rune: chunk = %q size = %d, want %q 5", chunk, size, "€\\n")
 	}
@@ -53,7 +53,7 @@ func TestOutputBoundaryPassesPermanentlyInvalidSequences(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			var buffer synchronizedBuffer
 			buffer.Write([]byte(tt.input))
-			chunk, size := buffer.from(0, false)
+			chunk, _, size := buffer.from(0, false)
 			if chunk != tt.wantText || size != tt.wantSize {
 				t.Fatalf("from(0) = %q %d, want %q %d", chunk, size, tt.wantText, tt.wantSize)
 			}
@@ -66,10 +66,10 @@ func TestFinalOutputFlushesTruncatedTail(t *testing.T) {
 
 	var buffer synchronizedBuffer
 	buffer.Write([]byte("a\xE2\x82"))
-	if chunk, size := buffer.from(0, false); chunk != "a" || size != 1 {
+	if chunk, _, size := buffer.from(0, false); chunk != "a" || size != 1 {
 		t.Fatalf("running: chunk = %q size = %d, want %q 1", chunk, size, "a")
 	}
-	chunk, size := buffer.from(1, true)
+	chunk, _, size := buffer.from(1, true)
 	if chunk != "\xE2\x82" || size != 3 {
 		t.Fatalf("flushed: chunk = %q size = %d, want %q 3", chunk, size, "\xe2\x82")
 	}
@@ -144,7 +144,7 @@ func TestRecoveryKillsOrphanedProcessGroup(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	jobs, order, err := loadJobHistory(workspace)
+	jobs, order, _, err := loadJobHistory(workspace)
 	if err != nil {
 		t.Fatalf("loadJobHistory() error = %v", err)
 	}
@@ -192,7 +192,7 @@ func TestRecoveryLeavesUnrelatedPidAlone(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, _, err := loadJobHistory(workspace); err != nil {
+	if _, _, _, err := loadJobHistory(workspace); err != nil {
 		t.Fatalf("loadJobHistory() error = %v", err)
 	}
 	if err := outside.Process.Signal(syscall.Signal(0)); err != nil {

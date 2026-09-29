@@ -28,6 +28,9 @@ type server struct {
 	sequence     uint64
 	lastActivity time.Time
 	workers      sync.WaitGroup
+	// warnings records job history files skipped at startup, reported on
+	// every response so clients surface them.
+	warnings []string
 }
 
 func Serve(workspace string, idle time.Duration) error {
@@ -61,7 +64,7 @@ func Serve(workspace string, idle time.Duration) error {
 	}
 	defer unix.Flock(int(lock.Fd()), unix.LOCK_UN)
 
-	jobs, order, err := loadJobHistory(workspace)
+	jobs, order, warnings, err := loadJobHistory(workspace)
 	if err != nil {
 		return err
 	}
@@ -88,6 +91,7 @@ func Serve(workspace string, idle time.Duration) error {
 		running:      make(map[string]int),
 		sequence:     uint64(len(order)),
 		lastActivity: time.Now(),
+		warnings:     warnings,
 	}
 	for _, id := range order {
 		record := jobs[id]
@@ -156,6 +160,7 @@ func (s *server) handle(conn *net.UnixConn) {
 		return
 	}
 	result := s.dispatch(message)
+	result.Warnings = s.warnings
 	_ = json.NewEncoder(conn).Encode(result)
 }
 

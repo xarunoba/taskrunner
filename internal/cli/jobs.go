@@ -15,10 +15,14 @@ import (
 	"github.com/xarunoba/taskrunner/internal/daemon"
 )
 
-func executeJobs(workspace string, options jobListOptions, stdout io.Writer) error {
-	jobs, err := daemon.NewClient(workspace).Jobs()
+func executeJobs(workspace string, options jobListOptions, stdout, stderr io.Writer) error {
+	client := daemon.NewClient(workspace)
+	jobs, err := client.Jobs()
 	if err != nil {
 		return fmt.Errorf("list jobs: %w", err)
+	}
+	if err := writeDaemonWarnings(client, stderr); err != nil {
+		return err
 	}
 	jobs = filterJobs(jobs, options)
 
@@ -83,16 +87,16 @@ func jobMatchesTask(job daemon.Job, value string) bool {
 	return strings.EqualFold(job.Name, value) || strings.EqualFold(job.TaskID, value) || strings.EqualFold(fileName, value)
 }
 
-func executeJobLogsByReference(workspace, reference string, options jobLogsOptions, stdout io.Writer) error {
-	client, job, err := loadJobByReference(workspace, reference)
+func executeJobLogsByReference(workspace, reference string, options jobLogsOptions, stdout, stderr io.Writer) error {
+	client, job, err := loadJobByReference(workspace, reference, stderr)
 	if err != nil {
 		return err
 	}
-	return executeJobLogs(client, job, options, stdout)
+	return executeJobLogs(client, job, options, stdout, stderr)
 }
 
-func executeJobByReference(workspace, reference string, action jobAction, jsonOutput bool, stdout io.Writer) error {
-	client, job, err := loadJobByReference(workspace, reference)
+func executeJobByReference(workspace, reference string, action jobAction, jsonOutput bool, stdout, stderr io.Writer) error {
+	client, job, err := loadJobByReference(workspace, reference, stderr)
 	if err != nil {
 		return err
 	}
@@ -126,11 +130,14 @@ func executeJobByReference(workspace, reference string, action jobAction, jsonOu
 	return nil
 }
 
-func loadJobByReference(workspace, reference string) (*daemon.Client, daemon.Job, error) {
+func loadJobByReference(workspace, reference string, stderr io.Writer) (*daemon.Client, daemon.Job, error) {
 	client := daemon.NewClient(workspace)
 	jobs, err := client.Jobs()
 	if err != nil {
 		return nil, daemon.Job{}, fmt.Errorf("list jobs: %w", err)
+	}
+	if err := writeDaemonWarnings(client, stderr); err != nil {
+		return nil, daemon.Job{}, err
 	}
 	job, err := findJob(jobs, reference)
 	if err != nil {
@@ -139,10 +146,13 @@ func loadJobByReference(workspace, reference string) (*daemon.Client, daemon.Job
 	return client, job, nil
 }
 
-func executeJobLogs(client *daemon.Client, job daemon.Job, options jobLogsOptions, stdout io.Writer) error {
+func executeJobLogs(client *daemon.Client, job daemon.Job, options jobLogsOptions, stdout, stderr io.Writer) error {
 	current, err := client.Job(job.ID, 0)
 	if err != nil {
 		return fmt.Errorf("read job %q: %w", job.ID, err)
+	}
+	if err := writeOutputGap(current, 0, stderr); err != nil {
+		return err
 	}
 	output := current.Output
 	if options.tailSet {
@@ -161,6 +171,9 @@ func executeJobLogs(client *daemon.Client, job daemon.Job, options jobLogsOption
 		current, err = client.Job(job.ID, offset)
 		if err != nil {
 			return fmt.Errorf("follow job %q: %w", job.ID, err)
+		}
+		if err := writeOutputGap(current, offset, stderr); err != nil {
+			return err
 		}
 		if current.Output != "" {
 			if _, err := io.WriteString(stdout, current.Output); err != nil {
@@ -221,6 +234,7 @@ func executeJobInspect(job daemon.Job, jsonOutput bool, stdout io.Writer) error 
 		{"Started", formatJobTime(job.StartedAt)},
 		{"Ended", formatJobTime(job.EndedAt)},
 		{"Output bytes", fmt.Sprintf("%d", job.OutputSize)},
+		{"Output starts at byte", fmt.Sprintf("%d", job.OutputStart)},
 		{"Error", job.Error},
 		{"Storage error", job.StorageError},
 	}
@@ -246,6 +260,9 @@ func executeJobPrune(client *daemon.Client, options jobPruneOptions, stdin io.Re
 	jobs, err := client.Jobs()
 	if err != nil {
 		return fmt.Errorf("list jobs: %w", err)
+	}
+	if err := writeDaemonWarnings(client, stderr); err != nil {
+		return err
 	}
 	var cutoff time.Time
 	if options.before > 0 {
@@ -380,7 +397,7 @@ func (a *cliApp) newJobsCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return executeJobs(workspace, options, a.stdout)
+			return executeJobs(workspace, options, a.stdout, a.stderr)
 		},
 	}
 	cmd.Flags().BoolVarP(&options.all, "all", "a", false, "Include completed jobs")
@@ -428,7 +445,7 @@ func (a *cliApp) newJobLogsCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return executeJobLogsByReference(workspace, args[0], options, a.stdout)
+			return executeJobLogsByReference(workspace, args[0], options, a.stdout, a.stderr)
 		},
 	}
 	cmd.Flags().BoolVarP(&options.follow, "follow", "f", false, "Follow output until the job finishes")
@@ -447,7 +464,7 @@ func (a *cliApp) newJobInspectCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return executeJobByReference(workspace, args[0], jobInspect, jsonOutput, a.stdout)
+			return executeJobByReference(workspace, args[0], jobInspect, jsonOutput, a.stdout, a.stderr)
 		},
 	}
 	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Emit JSON")
@@ -464,7 +481,7 @@ func (a *cliApp) newJobReferenceCommand(use, short string, action jobAction) *co
 			if err != nil {
 				return err
 			}
-			return executeJobByReference(workspace, args[0], action, false, a.stdout)
+			return executeJobByReference(workspace, args[0], action, false, a.stdout, a.stderr)
 		},
 	}
 }
@@ -559,4 +576,23 @@ func findJob(jobs []daemon.Job, reference string) (daemon.Job, error) {
 		return daemon.Job{}, fmt.Errorf("job %q not found", reference)
 	}
 	return *match, nil
+}
+
+func writeDaemonWarnings(client *daemon.Client, stderr io.Writer) error {
+	for _, warning := range client.Warnings() {
+		if _, err := fmt.Fprintf(stderr, "Warning: %s\n", warning); err != nil {
+			return fmt.Errorf("write job history warning: %w", err)
+		}
+	}
+	return nil
+}
+
+func writeOutputGap(job daemon.Job, offset int, stderr io.Writer) error {
+	if job.OutputStart <= offset {
+		return nil
+	}
+	if _, err := fmt.Fprintf(stderr, "Warning: job %s output truncated; skipped %d bytes before byte %d.\n", job.ID, job.OutputStart-offset, job.OutputStart); err != nil {
+		return fmt.Errorf("write output truncation warning: %w", err)
+	}
+	return nil
 }

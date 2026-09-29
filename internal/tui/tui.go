@@ -120,9 +120,10 @@ var jobPolicyLabels = []string{
 }
 
 type daemonPollMsg struct {
-	jobs    []daemon.Job
-	details map[string]daemon.Job
-	err     error
+	jobs     []daemon.Job
+	details  map[string]daemon.Job
+	warnings []string
+	err      error
 }
 
 type taskStartedMsg struct {
@@ -150,28 +151,29 @@ type jobActionMsg struct {
 }
 
 type model struct {
-	store        *task.Store
-	daemon       *daemon.Client
-	themes       *theme.Store
-	theme        theme.Theme
-	styles       styles
-	tasks        []task.Task
-	jobs         []daemon.Job
-	running      map[string]int
-	queued       map[string]int
-	latest       map[string]daemon.Status
-	trackedJobs  map[string]struct{}
-	cursor       int
-	jobCursor    int
-	screen       screen
-	taskScreen   screen
-	jobScreen    screen
-	status       string
-	statusError  bool
-	width        int
-	height       int
-	helpOpen     bool
-	helpViewport viewport.Model
+	store          *task.Store
+	daemon         *daemon.Client
+	themes         *theme.Store
+	theme          theme.Theme
+	styles         styles
+	tasks          []task.Task
+	jobs           []daemon.Job
+	daemonWarnings []string
+	running        map[string]int
+	queued         map[string]int
+	latest         map[string]daemon.Status
+	trackedJobs    map[string]struct{}
+	cursor         int
+	jobCursor      int
+	screen         screen
+	taskScreen     screen
+	jobScreen      screen
+	status         string
+	statusError    bool
+	width          int
+	height         int
+	helpOpen       bool
+	helpViewport   viewport.Model
 
 	settingsOpen    bool
 	settingsLoading bool
@@ -331,6 +333,9 @@ func (m *model) resizeResultViewport() {
 	if m.result.StorageError != "" {
 		chromeHeight++
 	}
+	if m.result.OutputStart > 0 {
+		chromeHeight++
+	}
 	if m.gap() == "\n\n" {
 		chromeHeight++
 	}
@@ -372,10 +377,9 @@ func (m model) pollDaemon() tea.Cmd {
 		tracked[id] = struct{}{}
 	}
 	resultID := ""
-	resultOffset := 0
+	result := m.result
 	if m.screen == screenResult && m.result.ID != "" && !m.result.Done() {
 		resultID = m.result.ID
-		resultOffset = m.result.OutputSize
 	}
 	return tea.Tick(250*time.Millisecond, func(time.Time) tea.Msg {
 		jobs, err := client.Jobs()
@@ -384,22 +388,24 @@ func (m model) pollDaemon() tea.Cmd {
 		}
 		details := make(map[string]daemon.Job)
 		for _, job := range jobs {
-			offset := 0
 			_, trackedJob := tracked[job.ID]
 			switch {
 			case trackedJob && job.Done():
 			case job.ID == resultID:
-				offset = resultOffset
+				if job.OutputSize == result.OutputSize && job.OutputStart == result.OutputStart &&
+					job.Status == result.Status && job.Error == result.Error && job.StorageError == result.StorageError {
+					continue
+				}
 			default:
 				continue
 			}
-			detail, err := client.Job(job.ID, offset)
+			detail, err := client.Job(job.ID, 0)
 			if err != nil {
 				return daemonPollMsg{err: err}
 			}
 			details[job.ID] = detail
 		}
-		return daemonPollMsg{jobs: jobs, details: details}
+		return daemonPollMsg{jobs: jobs, details: details, warnings: client.Warnings()}
 	})
 }
 
@@ -413,6 +419,7 @@ func cloneFields(fields []task.Field) []task.Field {
 }
 
 func (m *model) reload() error {
+	hadWarnings := m.hasLoadWarnings()
 	items, err := m.store.Load()
 	if err != nil {
 		return err
@@ -422,6 +429,9 @@ func (m *model) reload() error {
 		m.cursor = 0
 	} else if m.cursor >= len(m.tasks) {
 		m.cursor = len(m.tasks) - 1
+	}
+	if hadWarnings != m.hasLoadWarnings() {
+		m.resize(m.width, m.height)
 	}
 	return nil
 }

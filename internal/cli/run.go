@@ -37,11 +37,14 @@ func (a *cliApp) newRunCommand() *cobra.Command {
 			return nil
 		},
 		RunE: func(_ *cobra.Command, args []string) error {
-			workspace, _, items, err := loadTaskStore()
+			workspace, store, items, err := loadTaskStore()
 			if err != nil {
 				return err
 			}
-			item, err := findTask(items, args[0])
+			if err := reportLoadWarnings(store, a.stderr); err != nil {
+				return err
+			}
+			item, err := findValidTask(store, items, args[0])
 			if err != nil {
 				return err
 			}
@@ -164,6 +167,9 @@ func executeTask(workspace string, item task.Task, values map[string]string, opt
 	if err != nil {
 		return fmt.Errorf("start task %q: %w", item.Name, err)
 	}
+	if err := writeDaemonWarnings(client, stderr); err != nil {
+		return err
+	}
 	if options.detach {
 		if _, err := fmt.Fprintln(stdout, job.ID); err != nil {
 			return fmt.Errorf("write job id: %w", err)
@@ -176,6 +182,9 @@ func executeTask(workspace string, item task.Task, values map[string]string, opt
 		current, err := client.Job(job.ID, outputOffset)
 		if err != nil {
 			return fmt.Errorf("follow task %q: %w", item.Name, err)
+		}
+		if err := writeOutputGap(current, outputOffset, stderr); err != nil {
+			return err
 		}
 		if current.Output != "" {
 			if _, err := io.WriteString(stdout, current.Output); err != nil {

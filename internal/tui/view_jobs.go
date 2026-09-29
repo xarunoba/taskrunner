@@ -123,6 +123,10 @@ func (m model) resultView() string {
 		body.WriteByte('\n')
 		body.WriteString(m.styles.error.Render("Log persistence: " + m.result.StorageError))
 	}
+	if m.result.OutputStart > 0 {
+		body.WriteByte('\n')
+		body.WriteString(m.styles.error.Render(fmt.Sprintf("Output truncated: %d bytes omitted", m.result.OutputStart)))
+	}
 	body.WriteString(m.gap())
 	body.WriteString(lipgloss.JoinHorizontal(
 		lipgloss.Top,

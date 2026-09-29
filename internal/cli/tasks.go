@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"text/tabwriter"
 
@@ -59,9 +60,41 @@ func executeTaskShow(item task.Task, jsonOutput bool, stdout io.Writer) error {
 	return writeJSON(stdout, newTaskView(item), !jsonOutput)
 }
 
-func executeTaskValidate(items []task.Task, name string) error {
+// reportLoadWarnings prints per-file task load problems to stderr so JSON
+// and table stdout stays machine-readable.
+func reportLoadWarnings(store *task.Store, stderr io.Writer) error {
+	for _, warning := range store.LoadWarnings() {
+		if _, err := fmt.Fprintln(stderr, "warning:", warning); err != nil {
+			return fmt.Errorf("write load warning: %w", err)
+		}
+	}
+	return nil
+}
+
+// findInvalidTask returns the skipped task file with exactly that filename,
+// if any. Only the exact byte filename matches: skipped files cannot be
+// resolved through name or stem fallbacks.
+func findInvalidTask(store *task.Store, name string) (task.Task, bool) {
+	for _, item := range store.InvalidTasks() {
+		if item.File == name {
+			return item, true
+		}
+	}
+	return task.Task{}, false
+}
+
+func findValidTask(store *task.Store, items []task.Task, name string) (task.Task, error) {
+	for i, item := range store.InvalidTasks() {
+		if item.File == name {
+			return task.Task{}, store.LoadWarnings()[i]
+		}
+	}
+	return findTask(items, name)
+}
+
+func executeTaskValidate(store *task.Store, items []task.Task, name string) error {
 	if name != "" {
-		item, err := findTask(items, name)
+		item, err := findValidTask(store, items, name)
 		if err != nil {
 			return err
 		}
@@ -72,18 +105,29 @@ func executeTaskValidate(items []task.Task, name string) error {
 			return fmt.Errorf("validate task %q: %w", item.Name, err)
 		}
 	}
+	if warnings := store.LoadWarnings(); len(warnings) > 0 {
+		return fmt.Errorf("validate tasks: %w", warnings[0])
+	}
 	return nil
 }
 
 func executeTaskRemove(store *task.Store, items []task.Task, name string, force bool, stdin io.Reader, stdout, stderr io.Writer) error {
-	item, err := findTask(items, name)
-	if err != nil {
-		return err
+	item, invalid := findInvalidTask(store, name)
+	if !invalid {
+		var err error
+		item, err = findTask(items, name)
+		if err != nil {
+			return err
+		}
+	}
+	label := item.Name
+	if label == "" {
+		label = item.File
 	}
 	confirmed, err := confirmDestructive(
 		stdin,
 		stderr,
-		fmt.Sprintf("Remove task %q? [y/N] ", item.Name),
+		fmt.Sprintf("Remove task %q? [y/N] ", label),
 		force,
 	)
 	if err != nil {
@@ -186,8 +230,11 @@ func (a *cliApp) newTasksCommand() *cobra.Command {
 		Short: "List task definitions",
 		Args:  cobra.NoArgs,
 		RunE: func(_ *cobra.Command, _ []string) error {
-			_, _, items, err := loadTaskStore()
+			_, store, items, err := loadTaskStore()
 			if err != nil {
+				return err
+			}
+			if err := reportLoadWarnings(store, a.stderr); err != nil {
 				return err
 			}
 			return executeTasks(items, jsonOutput, a.stdout)
@@ -217,11 +264,14 @@ func (a *cliApp) newTaskShowCommand() *cobra.Command {
 		Short: "Print a task definition",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
-			_, _, items, err := loadTaskStore()
+			_, store, items, err := loadTaskStore()
 			if err != nil {
 				return err
 			}
-			item, err := findTask(items, args[0])
+			if err := reportLoadWarnings(store, a.stderr); err != nil {
+				return err
+			}
+			item, err := findValidTask(store, items, args[0])
 			if err != nil {
 				return err
 			}
@@ -238,7 +288,7 @@ func (a *cliApp) newTaskValidateCommand() *cobra.Command {
 		Short: "Validate one task or every task",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
-			_, _, items, err := loadTaskStore()
+			_, store, items, err := loadTaskStore()
 			if err != nil {
 				return err
 			}
@@ -246,7 +296,10 @@ func (a *cliApp) newTaskValidateCommand() *cobra.Command {
 			if len(args) == 1 {
 				name = args[0]
 			}
-			return executeTaskValidate(items, name)
+			if err := reportLoadWarnings(store, a.stderr); err != nil {
+				return err
+			}
+			return executeTaskValidate(store, items, name)
 		},
 	}
 }
@@ -262,6 +315,9 @@ func (a *cliApp) newTaskRemoveCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			if err := reportLoadWarnings(store, a.stderr); err != nil {
+				return err
+			}
 			return executeTaskRemove(store, items, args[0], force, a.stdin, a.stdout, a.stderr)
 		},
 	}
@@ -270,32 +326,48 @@ func (a *cliApp) newTaskRemoveCommand() *cobra.Command {
 }
 
 // findTask prefers an exact filename, then case-insensitive filename, task
-// name, and file-stem matches.
+// name, and file-stem matches. Within each fallback priority an ambiguous
+// match is rejected with the exact candidate filenames; exact byte
+// filenames always win.
 func findTask(items []task.Task, name string) (task.Task, error) {
-	var byFile, byName, byStem *task.Task
 	for i := range items {
-		item := &items[i]
-		if item.File == name {
-			return *item, nil
-		}
-		stem := strings.TrimSuffix(item.File, filepath.Ext(item.File))
-		switch {
-		case strings.EqualFold(item.File, name) && byFile == nil:
-			byFile = item
-		case strings.EqualFold(item.Name, name) && byName == nil:
-			byName = item
-		case strings.EqualFold(stem, name) && byStem == nil:
-			byStem = item
+		if items[i].File == name {
+			return items[i], nil
 		}
 	}
-	switch {
-	case byFile != nil:
-		return *byFile, nil
-	case byName != nil:
-		return *byName, nil
-	case byStem != nil:
-		return *byStem, nil
-	default:
-		return task.Task{}, fmt.Errorf("task %q not found", name)
+	for priority := range 3 {
+		match := -1
+		var files []string
+		for i := range items {
+			key := items[i].File
+			switch priority {
+			case 1:
+				key = items[i].Name
+			case 2:
+				key = strings.TrimSuffix(items[i].File, filepath.Ext(items[i].File))
+			}
+			if !strings.EqualFold(key, name) {
+				continue
+			}
+			if match < 0 {
+				match = i
+				continue
+			}
+			if files == nil {
+				files = []string{items[match].File}
+			}
+			files = append(files, items[i].File)
+		}
+		if len(files) > 0 {
+			sort.Strings(files)
+			return task.Task{}, fmt.Errorf(
+				"task %q is ambiguous, matches %s; use the exact filename",
+				name, strings.Join(files, ", "),
+			)
+		}
+		if match >= 0 {
+			return items[match], nil
+		}
 	}
+	return task.Task{}, fmt.Errorf("task %q not found", name)
 }

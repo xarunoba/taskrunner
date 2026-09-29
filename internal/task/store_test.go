@@ -124,3 +124,104 @@ func TestSaveRenameKeepsOldFileOnCollision(t *testing.T) {
 		}
 	}
 }
+
+func TestLoadIsolatesCorruptSibling(t *testing.T) {
+	t.Parallel()
+
+	workspace := t.TempDir()
+	store := NewStore(workspace)
+	if _, err := store.Save(Task{Name: "Build", Command: "true"}, ""); err != nil {
+		t.Fatalf("save valid task: %v", err)
+	}
+	corrupt := filepath.Join(workspace, ".taskrunner", "tasks", "broken.json")
+	if err := os.WriteFile(corrupt, []byte("{not json"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	items, err := store.Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v, want the valid task to load", err)
+	}
+	if len(items) != 1 || items[0].Name != "Build" {
+		t.Fatalf("loaded tasks = %#v, want only Build", items)
+	}
+	warnings := store.LoadWarnings()
+	if len(warnings) != 1 {
+		t.Fatalf("LoadWarnings() = %v, want exactly one", warnings)
+	}
+	if !strings.Contains(warnings[0].Error(), "broken.json") || !strings.Contains(warnings[0].Error(), "decode") {
+		t.Fatalf("warning = %v, want the exact filename and decode reason", warnings[0])
+	}
+	invalid := store.InvalidTasks()
+	if len(invalid) != 1 || invalid[0].File != "broken.json" {
+		t.Fatalf("InvalidTasks() = %#v, want broken.json", invalid)
+	}
+	if _, err := os.Stat(corrupt); err != nil {
+		t.Fatalf("corrupt file was not preserved: %v", err)
+	}
+}
+
+func TestLoadReportsInvalidDefinition(t *testing.T) {
+	t.Parallel()
+
+	workspace := t.TempDir()
+	store := NewStore(workspace)
+	if _, err := store.Save(Task{Name: "Build", Command: "true"}, ""); err != nil {
+		t.Fatalf("save valid task: %v", err)
+	}
+	invalidPath := filepath.Join(workspace, ".taskrunner", "tasks", "incomplete.json")
+	if err := os.WriteFile(invalidPath, []byte(`{"name":"Incomplete"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	items, err := store.Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if len(items) != 1 || items[0].Name != "Build" {
+		t.Fatalf("loaded tasks = %#v, want only Build", items)
+	}
+	warnings := store.LoadWarnings()
+	if len(warnings) != 1 || !strings.Contains(warnings[0].Error(), "incomplete.json") {
+		t.Fatalf("LoadWarnings() = %v, want one warning naming incomplete.json", warnings)
+	}
+	invalid := store.InvalidTasks()
+	if len(invalid) != 1 || invalid[0].File != "incomplete.json" || invalid[0].Name != "Incomplete" {
+		t.Fatalf("InvalidTasks() = %#v, want the incomplete definition", invalid)
+	}
+	if err := invalid[0].Validate(); err == nil {
+		t.Fatal("Validate() on invalid entry = nil, want failure")
+	}
+}
+
+func TestLoadReportsUnreadableFile(t *testing.T) {
+	t.Parallel()
+
+	workspace := t.TempDir()
+	store := NewStore(workspace)
+	if _, err := store.Save(Task{Name: "Build", Command: "true"}, ""); err != nil {
+		t.Fatalf("save valid task: %v", err)
+	}
+	locked := filepath.Join(workspace, ".taskrunner", "tasks", "locked.json")
+	if err := os.WriteFile(locked, []byte("{}"), 0o000); err != nil {
+		t.Fatal(err)
+	}
+	if os.Geteuid() == 0 {
+		t.Skip("running as root; permission bits are not enforced")
+	}
+
+	items, err := store.Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if len(items) != 1 || items[0].Name != "Build" {
+		t.Fatalf("loaded tasks = %#v, want only Build", items)
+	}
+	warnings := store.LoadWarnings()
+	if len(warnings) != 1 || !strings.Contains(warnings[0].Error(), "locked.json") {
+		t.Fatalf("LoadWarnings() = %v, want one warning naming locked.json", warnings)
+	}
+	if err := os.Chmod(locked, 0o644); err != nil {
+		t.Fatal(err)
+	}
+}

@@ -14,6 +14,11 @@ func (m *model) applyDaemonPoll(msg daemonPollMsg) {
 		m.setError(fmt.Errorf("poll daemon: %w", msg.err))
 		return
 	}
+	hadWarnings := m.hasLoadWarnings()
+	m.daemonWarnings = msg.warnings
+	if hadWarnings != m.hasLoadWarnings() {
+		m.resize(m.width, m.height)
+	}
 	m.setJobs(msg.jobs)
 
 	for _, job := range m.jobs {
@@ -54,12 +59,8 @@ func (m *model) setJobs(jobs []daemon.Job) {
 
 func (m *model) updateOpenResult(job daemon.Job) {
 	atBottom := m.resultViewport.AtBottom()
-	if len(job.Output) == job.OutputSize {
-		m.result.Output = job.Output
-	} else {
-		m.result.Output += job.Output
-	}
-	job.Output = m.result.Output
+	// Polls fetch the complete retained window so eviction cannot leave an
+	// unbounded client-side copy or splice JSON-repaired UTF-8 by byte offset.
 	m.result = job
 	m.setResultContent()
 	if atBottom {
@@ -69,9 +70,9 @@ func (m *model) updateOpenResult(job daemon.Job) {
 
 func (m *model) openResult(job daemon.Job) {
 	m.result = job
+	m.showScreen(screenResult)
 	m.setResultContent()
 	m.resultViewport.GotoBottom()
-	m.showScreen(screenResult)
 }
 
 func (m *model) setResultContent() {
