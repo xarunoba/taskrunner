@@ -13,7 +13,7 @@ go install github.com/xarunoba/taskrunner@latest
 To install a specific release:
 
 ```sh
-go install github.com/xarunoba/taskrunner@v0.1.0
+go install github.com/xarunoba/taskrunner@v0.2.0
 ```
 
 ## Versions
