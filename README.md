@@ -13,12 +13,12 @@ go install github.com/xarunoba/taskrunner@latest
 To install a specific release:
 
 ```sh
-go install github.com/xarunoba/taskrunner@v0.2.0
+go install github.com/xarunoba/taskrunner@v1.0.0
 ```
 
 ## Versions
 
-Releases use SemVer tags. During 0.x development, incompatible changes to the CLI, task JSON, or persisted job records increment the minor version; compatible fixes increment the patch version. Version 1.0.0 will mark the stable public contract.
+Releases use SemVer tags. Incompatible changes to the CLI, task JSON, or persisted job records increment the major version; compatible additions increment the minor version; compatible fixes increment the patch version. Version 1.0.0 establishes the stable public contract.
 
 ## Usage
 
