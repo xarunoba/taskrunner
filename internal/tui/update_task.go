@@ -132,14 +132,14 @@ func (m model) updateTaskNavigationKey(key string) (model, tea.Cmd, bool) {
 				return m, nil, false
 			}
 		}
-		if m.taskFocus == 1 {
-			if m.fieldCursor < len(m.formFields)-1 {
-				m.fieldCursor++
-			}
+		if m.taskFocus == 1 && m.fieldCursor < len(m.formFields)-1 {
+			m.fieldCursor++
 			return m, nil, true
 		}
-		m.taskFocus++
-		return m, m.focusTaskControl(), true
+		if m.taskFocus < 3 {
+			m.taskFocus++
+			return m, m.focusTaskControl(), true
+		}
 	case "enter":
 		if m.taskFocus == 2 {
 			return m, nil, false
@@ -172,6 +172,9 @@ func (m model) updateTaskFieldsKey(key string) (model, tea.Cmd, bool) {
 	case "j":
 		if m.fieldCursor < len(m.formFields)-1 {
 			m.fieldCursor++
+		} else {
+			m.taskFocus = 2
+			return m, m.focusTaskControl(), true
 		}
 	case "a":
 		m.openFieldForm(-1)

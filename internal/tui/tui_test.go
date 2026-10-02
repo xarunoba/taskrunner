@@ -710,6 +710,63 @@ func TestTaskFormArrowAndMouseNavigation(t *testing.T) {
 	}
 }
 
+func TestTaskFormDownLeavesFieldsAtLastField(t *testing.T) {
+	t.Parallel()
+
+	m := newModel(task.NewStore(t.TempDir()), nil, theme.NewStore(t.TempDir()), theme.Default())
+	m.resize(80, 24)
+	m.openTaskForm(task.Task{
+		Name:    "Demo",
+		Command: "printf ok",
+		Fields: []task.Field{
+			{Key: "first", Label: "First", Type: task.FieldText},
+			{Key: "second", Label: "Second", Type: task.FieldText},
+		},
+	})
+	m.taskFocus = 1
+	m.fieldCursor = len(m.formFields) - 1
+
+	updated, _ := m.updateTaskForm(tea.KeyMsg{Type: tea.KeyDown})
+	m = updated.(model)
+	if m.taskFocus != 2 || !m.taskCommandInput.Focused() {
+		t.Fatalf("down from last field focus = %d focused = %v, want focused command", m.taskFocus, m.taskCommandInput.Focused())
+	}
+
+	updated, _ = m.updateTaskForm(tea.KeyMsg{Type: tea.KeyUp})
+	m = updated.(model)
+	if m.taskFocus != 1 || m.fieldCursor != 1 {
+		t.Fatalf("up from command focus = %d cursor = %d, want fields at last field", m.taskFocus, m.fieldCursor)
+	}
+
+	updated, _ = m.updateTaskForm(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+	m = updated.(model)
+	if m.taskFocus != 2 || !m.taskCommandInput.Focused() {
+		t.Fatalf("j from last field focus = %d focused = %v, want focused command", m.taskFocus, m.taskCommandInput.Focused())
+	}
+
+	updated, _ = m.updateTaskForm(tea.KeyMsg{Type: tea.KeyDown})
+	m = updated.(model)
+	if m.taskFocus != 3 {
+		t.Fatalf("down from command focus = %d, want 3", m.taskFocus)
+	}
+
+	updated, _ = m.updateTaskForm(tea.KeyMsg{Type: tea.KeyDown})
+	m = updated.(model)
+	if m.taskFocus != 3 || m.formJobPolicy != task.JobSequential {
+		t.Fatalf("down from job policy focus = %d policy = %q, want unchanged policy row", m.taskFocus, m.formJobPolicy)
+	}
+
+	bare := newModel(task.NewStore(t.TempDir()), nil, theme.NewStore(t.TempDir()), theme.Default())
+	bare.resize(80, 24)
+	bare.openTaskForm(task.Task{})
+	bare.taskFocus = 1
+	updated, _ = bare.updateTaskForm(tea.KeyMsg{Type: tea.KeyDown})
+	bare = updated.(model)
+	if bare.taskFocus != 2 {
+		t.Fatalf("down with no fields focus = %d, want 2", bare.taskFocus)
+	}
+}
+
 func TestCommandEditorArrowBoundaries(t *testing.T) {
 	t.Parallel()
 	for _, command := range []string{"", "printf ok", "one\ntwo\nthree", "one\n", strings.Repeat("界abc ", 24)} {
