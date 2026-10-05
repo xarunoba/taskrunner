@@ -335,6 +335,11 @@ func (s *server) startLocked(record *jobRecord) {
 	})
 }
 
+// waitDelay bounds how long execute waits for the job's output pipes to
+// close after the job's process exits, so background children that inherit
+// the pipes cannot hold a finished job in running indefinitely.
+var waitDelay = 5 * time.Second
+
 func (s *server) execute(ctx context.Context, record *jobRecord) {
 	shell := envValue(record.env, "SHELL")
 	if record.env == nil {
@@ -347,6 +352,7 @@ func (s *server) execute(ctx context.Context, record *jobRecord) {
 	if record.env != nil {
 		cmd.Env = record.env
 	}
+	cmd.WaitDelay = waitDelay
 	cmd.Dir = s.workspace
 	cmd.Stdout = &record.output
 	cmd.Stderr = &record.output
@@ -392,6 +398,10 @@ func (s *server) execute(ctx context.Context, record *jobRecord) {
 		if record.Error == "" {
 			record.Error = "canceled"
 		}
+	case errors.Is(err, exec.ErrWaitDelay):
+		// The process exited successfully; only background children that
+		// inherited the output pipes outlived the bounded post-exit wait.
+		record.Status = StatusSucceeded
 	default:
 		record.Status = StatusFailed
 		record.Error = err.Error()

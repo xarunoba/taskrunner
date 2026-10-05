@@ -3,6 +3,7 @@ package daemon
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -212,6 +213,37 @@ func waitForJobStatus(t *testing.T, client *Client, id string, want Status) {
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
+}
+
+func TestJobFinishesWhenBackgroundChildHoldsOutputPipes(t *testing.T) {
+	workspace := t.TempDir()
+	previousDelay := waitDelay
+	waitDelay = 200 * time.Millisecond
+	t.Cleanup(func() { waitDelay = previousDelay })
+	stopped := startTestServer(t, workspace)
+	client := NewClient(workspace)
+
+	// The shell exits immediately, but `sleep 30 &` inherits the output
+	// pipes. Without a bounded post-exit wait the job stays running until
+	// the background child exits.
+	job, err := client.Start("spawn.json", "Spawn", "printf 'spawned output'; sleep 30 &", task.JobParallel)
+	if err != nil {
+		t.Fatalf("start job: %v", err)
+	}
+	waitForJobStatus(t, client, job.ID, StatusSucceeded)
+
+	done, err := client.Job(job.ID, 0)
+	if err != nil {
+		t.Fatalf("get job: %v", err)
+	}
+	if done.Error != "" {
+		t.Fatalf("job error = %q, want none", done.Error)
+	}
+	if !strings.Contains(done.Output, "spawned output") {
+		t.Fatalf("job output = %q, want spawned output", done.Output)
+	}
+
+	waitForServerExit(t, stopped)
 }
 
 func startTestServer(t *testing.T, workspace string) <-chan error {

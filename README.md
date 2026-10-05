@@ -145,7 +145,7 @@ Tasks execute shell commands through `$SHELL -c`, falling back to `/bin/sh`. Rev
 
 Argument-mode fields use POSIX/Bash template syntax. Placeholders can appear in shell arguments, quoted strings, and heredoc bodies. Values are quoted for their syntax context and are never rescanned for placeholders. Placeholders in shell expressions or identifiers are rejected because argument quoting cannot make those positions safe. Raw mode inserts trusted shell syntax without quoting; enable it only for trusted input.
 
-Jobs run with the invoking process's environment, including an empty environment. Job records save that environment in owner-only files for reruns; it may contain secrets. On restart, the daemon kills surviving job process groups whose leader PID and start time match the saved record, then marks interrupted jobs failed. A crash before that identity is saved can leave a job running. Taskrunner rejects symlinked storage directories and value-history files.
+Jobs run with the invoking process's environment, including an empty environment. Job records save that environment in owner-only files for reruns; it may contain secrets. A job ends shortly after its command exits even when background processes the command started keep the output pipes open; output they write afterward is discarded. On restart, the daemon kills surviving job process groups whose leader PID and start time match the saved record, then marks interrupted jobs failed. A crash before that identity is saved can leave a job running. Taskrunner rejects symlinked storage directories and value-history files.
 
 ## Development
 
